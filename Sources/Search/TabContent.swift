@@ -16,9 +16,9 @@ import UniformTypeIdentifiers
 // Not autosaved in place: a file opened in a browser is usually being looked
 // at, and is written only when you say so.
 //
-// SPIKE: one kind of document (text: Markdown, JSON, plain text), edited as
-// text. Rendered Markdown, a JSON tree, SQLite and spreadsheets would each be
-// another conformer.
+// One kind so far: text — Markdown, JSON, plain text — edited as text, with
+// Markdown read as it renders (MarkdownRender.swift). A JSON tree, SQLite and
+// spreadsheets would each be another conformer.
 
 /// What a tab shows instead of a web page.
 protocol TabContent: NSDocument {
@@ -34,6 +34,14 @@ protocol TabContent: NSDocument {
     func showFind()
     /// ⌘+ and ⌘-: how big it is drawn, 1 for as it is.
     var zoom: CGFloat { get set }
+    /// Showing the file as it reads — rendered Markdown — rather than as
+    /// it is written.
+    var isReading: Bool { get }
+    /// ⇧⌘R: to the reading view or back to the source. False, and nothing
+    /// changes, for a kind of file that has only the one.
+    func setReading(_ on: Bool) -> Bool
+    /// A link clicked in it, for the browser to open.
+    var onLink: ((URL) -> Void)? { get set }
 }
 
 extension TabContent {
@@ -98,6 +106,8 @@ enum Documents {
         // Told when another app changes the file. A document with a window
         // of its own is put on the list by AppKit; one in a tab isn't.
         NSFileCoordinator.addFilePresenter(document)
+        // Opened in a browser, Markdown is for reading first; ⇧⌘R for its source.
+        _ = document.setReading(true)
         return document
     }
 
@@ -122,17 +132,26 @@ private extension UTType {
     static let markdown = UTType("net.daringfireball.markdown") ?? .plainText
 }
 
-/// A text file, edited as text.
+/// A text file, edited as text — and Markdown, read as it renders.
 final class TextDocument: NSDocument, TabContent, NSTextViewDelegate {
+    /// The stage's view: the source and, for Markdown, the reading view
+    /// over it, one shown at a time.
+    private let page = NSView()
     private let scroll = NSTextView.scrollableTextView()
     private let editor = DocumentTextView()
+    private let reading = NSTextView.scrollableTextView()
+    private var reader: NSTextView { reading.documentView as! NSTextView }
+    private(set) var isReading = false
+    var onLink: ((URL) -> Void)?
     /// The file's own encoding, written back the way it was read.
     private var encoding: String.Encoding = .utf8
 
     var onDirty: ((Bool) -> Void)?
 
-    var view: NSView { scroll }
-    var focus: NSView { editor }
+    var view: NSView { page }
+    var focus: NSView { isReading ? reader : editor }
+    /// The view on show, for print and find.
+    private var shown: NSTextView { isReading ? reader : editor }
     var text: String? { editor.string }
 
     override init() {
@@ -162,6 +181,25 @@ final class TextDocument: NSDocument, TabContent, NSTextViewDelegate {
         scroll.allowsMagnification = true
         scroll.minMagnification = 0.4
         scroll.maxMagnification = 3
+
+        reader.isEditable = false
+        reader.isSelectable = true
+        reader.usesFindBar = true
+        reader.isIncrementalSearchingEnabled = true
+        reader.textContainerInset = NSSize(width: 40, height: 28)
+        reader.linkTextAttributes = [.foregroundColor: NSColor.linkColor, .cursor: NSCursor.pointingHand]
+        reader.delegate = self
+        reading.drawsBackground = true
+        reading.allowsMagnification = true
+        reading.minMagnification = 0.4
+        reading.maxMagnification = 3
+        reading.isHidden = true
+
+        for each in [scroll, reading] {
+            each.frame = page.bounds
+            each.autoresizingMask = [.width, .height]
+            page.addSubview(each)
+        }
     }
 
     // MARK: - NSDocument
@@ -177,7 +215,7 @@ final class TextDocument: NSDocument, TabContent, NSTextViewDelegate {
     }
 
     /// Where NSDocument puts its questions: the window the tab is in.
-    override var windowForSheet: NSWindow? { scroll.window ?? NSApp.keyWindow }
+    override var windowForSheet: NSWindow? { page.window ?? NSApp.keyWindow }
 
     override func read(from data: Data, ofType typeName: String) throws {
         // Not UTF-8: Latin-1 reads anything, which beats refusing the file,
@@ -193,6 +231,8 @@ final class TextDocument: NSDocument, TabContent, NSTextViewDelegate {
             ? .monospacedSystemFont(ofSize: 12, weight: .regular)
             : .systemFont(ofSize: 14)
         undoManager?.removeAllActions()
+        // Read again — another app changed it, or Revert — and shown again.
+        if isReading { render() }
     }
 
     override func data(ofType typeName: String) throws -> Data {
@@ -222,7 +262,7 @@ final class TextDocument: NSDocument, TabContent, NSTextViewDelegate {
     }
 
     override func printOperation(withSettings printSettings: [NSPrintInfo.AttributeKey: Any]) throws -> NSPrintOperation {
-        NSPrintOperation(view: editor, printInfo: printInfo)
+        NSPrintOperation(view: shown, printInfo: printInfo)
     }
 
     /// Another app wrote the file. With nothing typed here, what it wrote is
@@ -244,18 +284,47 @@ final class TextDocument: NSDocument, TabContent, NSTextViewDelegate {
     /// NSDocument counts — and undoing back to the saved text clears the mark.
     func undoManager(for view: NSTextView) -> UndoManager? { undoManager }
 
+    /// A link in the reading view goes to the browser, not to whichever app
+    /// the system would pick: another .md beside it opens in Search too.
+    /// One to a heading in this same file has nowhere else to go.
+    func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+        let url = (link as? URL) ?? (link as? String).flatMap { URL(string: $0, relativeTo: fileURL) }
+        guard let url = url?.absoluteURL else { return true }
+        if url.isFileURL, url.path == fileURL?.path { return true }
+        onLink?(url)
+        return true
+    }
+
     // MARK: - TabContent
 
     var zoom: CGFloat {
         get { scroll.magnification }
-        set { scroll.magnification = newValue }
+        set {
+            scroll.magnification = newValue
+            reading.magnification = newValue
+        }
     }
 
     func showFind() {
         let item = NSMenuItem()
         item.tag = NSTextFinder.Action.showFindInterface.rawValue
-        editor.window?.makeFirstResponder(editor)
-        editor.performTextFinderAction(item)
+        shown.window?.makeFirstResponder(shown)
+        shown.performTextFinderAction(item)
+    }
+
+    func setReading(_ on: Bool) -> Bool {
+        guard fileType.flatMap(UTType.init)?.conforms(to: .markdown) == true else { return false }
+        isReading = on
+        // Rendered from what is in the editor, changes not yet saved included.
+        if on { render() }
+        reading.isHidden = !on
+        scroll.isHidden = on
+        if let window = page.window { window.makeFirstResponder(shown) }
+        return true
+    }
+
+    private func render() {
+        reader.textStorage?.setAttributedString(MarkdownRender.attributed(editor.string, base: fileURL))
     }
 }
 

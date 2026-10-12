@@ -79,6 +79,8 @@ final class DocumentTests: XCTestCase {
     func testSaveWritesWhatIsInTheViewAndClearsTheMark() throws {
         let url = try file("notes.md", "# Notes\n")
         let document = try open(url)
+        // Markdown opens to read; its source is where typing goes.
+        XCTAssertTrue(document.setReading(false))
         let editor = try XCTUnwrap(document.focus as? NSTextView)
         editor.string = "# Notes\nmore\n"
         document.updateChangeCount(.changeDone)
@@ -103,5 +105,53 @@ final class DocumentTests: XCTestCase {
         try document.revert()
         XCTAssertEqual(document.text, "{\"elsewhere\": 1}\n")
         XCTAssertFalse(document.dirty)
+    }
+
+    // MARK: - Markdown, read as it renders
+
+    func testMarkdownOpensInTheReadingViewAndOtherTextDoesNot() throws {
+        let markdown = try open(try file("notes.md", "# Notes\n"))
+        XCTAssertTrue(markdown.isReading)
+        XCTAssertTrue(markdown.setReading(false))
+        XCTAssertFalse(markdown.isReading)
+
+        let json = try open(try file("data.json", "{}\n"))
+        XCTAssertFalse(json.isReading)
+        XCTAssertFalse(json.setReading(true), "JSON has only its source")
+        XCTAssertFalse(json.isReading)
+    }
+
+    func testMarkdownRendersItsBlocksAndKeepsItsLinks() {
+        let source = "# Title\n\nSome **bold** text and a [link](other.md).\n\n- one\n- two\n\n1. first\n2. second\n"
+        let base = URL(fileURLWithPath: "/tmp/docs/notes.md")
+        let rendered = MarkdownRender.attributed(source, base: base)
+        let text = rendered.string
+
+        XCTAssertTrue(text.hasPrefix("Title\n"), "the heading's # is markup, not text")
+        XCTAssertTrue(text.contains("•\tone"))
+        XCTAssertTrue(text.contains("•\ttwo"))
+        XCTAssertTrue(text.contains("1.\tfirst"))
+        XCTAssertTrue(text.contains("2.\tsecond"))
+        XCTAssertFalse(text.contains("**"))
+
+        let heading = rendered.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+        let body = rendered.attribute(.font, at: (text as NSString).range(of: "Some").location, effectiveRange: nil) as? NSFont
+        XCTAssertGreaterThan(heading?.pointSize ?? 0, body?.pointSize ?? .infinity)
+
+        let link = rendered.attribute(.link, at: (text as NSString).range(of: "link").location, effectiveRange: nil) as? URL
+        XCTAssertEqual(link?.absoluteURL.path, "/tmp/docs/other.md", "a relative link is beside the file")
+    }
+
+    func testALinkClickedGoesToTheBrowserButOneToTheSameFileDoesNot() throws {
+        let url = try file("notes.md", "[other](other.md) and [here](#top)\n")
+        let document = try XCTUnwrap(try open(url) as? TextDocument)
+        var opened: [URL] = []
+        document.onLink = { opened.append($0) }
+        let view = NSTextView()
+
+        XCTAssertTrue(document.textView(view, clickedOnLink: URL(string: "https://example.com")!, at: 0))
+        XCTAssertTrue(document.textView(view, clickedOnLink: folder.appendingPathComponent("other.md"), at: 0))
+        XCTAssertTrue(document.textView(view, clickedOnLink: URL(string: "#top", relativeTo: url)!, at: 0))
+        XCTAssertEqual(opened.map { $0.isFileURL ? $0.lastPathComponent : $0.absoluteString }, ["https://example.com", "other.md"])
     }
 }

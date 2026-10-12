@@ -363,7 +363,13 @@ final class Tab: ObservableObject, Identifiable {
     /// restoring the HTML gives you a page that looks right and does nothing,
     /// because every listener the page had was thrown away with it.
     func toggleReader(_ done: @escaping (Bool) -> Void) {
-        guard !isBlank, document == nil else {
+        // A document reads its own way: Markdown rendered, or its source.
+        if let document {
+            let worked = document.setReading(!document.isReading)
+            if worked { reader = document.isReading }
+            return done(worked)
+        }
+        guard !isBlank else {
             done(false)
             return
         }
@@ -502,6 +508,8 @@ final class Tab: ObservableObject, Identifiable {
     /// WebKit keeps each kind of view to its own pages, so the tab has to be
     /// swapped for one built for the address (see Browser.replace).
     var onCross: ((Tab, URL) -> Void)?
+    /// A link clicked in a document, opened in a tab beside it.
+    var onOpenLink: ((Tab, URL) -> Void)?
     /// A file another tab already holds as a document: that tab brought up
     /// instead (see Documents.holder). Whether it was.
     var onDocument: ((Tab, URL) -> Bool)?
@@ -1016,6 +1024,11 @@ final class Tab: ObservableObject, Identifiable {
         // Whatever page the tab had goes: a tab shows one thing.
         discard()
         let name = url.lastPathComponent
+        opened.onLink = { [weak self] link in
+            guard let self else { return }
+            onOpenLink?(self, link)
+        }
+        reader = opened.isReading
         opened.onDirty = { [weak self] dirty in
             self?.title = dirty ? "\(name) — Edited" : name
         }

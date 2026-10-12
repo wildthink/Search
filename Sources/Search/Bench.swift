@@ -691,9 +691,24 @@ final class Bench {
         switch verb {
         case "shot":
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
-            house(tab)
             let path = (request["path"] as? String)
                 ?? NSTemporaryDirectory() + "search-bench-\(Bench.short(tab)).png"
+            // A document draws its own view (see TabContent), as it is on
+            // the stage.
+            if let view = tab.document?.view {
+                view.layoutSubtreeIfNeeded()
+                guard view.bounds.width > 0, let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+                    answer(["error": "the document isn't on the stage"])
+                    return
+                }
+                view.cacheDisplay(in: view.bounds, to: image)
+                guard let png = image.representation(using: .png, properties: [:]),
+                      (try? png.write(to: URL(fileURLWithPath: path))) != nil
+                else { answer(["error": "couldn't write \(path)"]); return }
+                answer(["path": path, "width": image.pixelsWide, "height": image.pixelsHigh])
+                return
+            }
+            house(tab)
             let width = request["width"] as? Double
             shoot(tab, to: URL(fileURLWithPath: path), width: width, answer)
 

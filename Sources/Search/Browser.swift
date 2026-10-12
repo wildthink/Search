@@ -3867,6 +3867,9 @@ final class Browser: NSObject, ObservableObject {
         // From a private tab, the new one is private too, as for ⌘-click.
         tab.onMiddleClick = { [weak self] tab, url in self?.open(url, foreground: false, from: tab, mayWait: true) }
         tab.onCross = { [weak self] tab, url in self?.replace(tab, going: url) }
+        tab.onOpenLink = { [weak self] tab, url in
+            _ = self?.open(url, foreground: true, from: tab)
+        }
         tab.onDocument = { [weak self] tab, url in
             guard let self, let held = Documents.holder(of: url, except: tab) else { return false }
             bringUp(held.tab, in: held.browser)
