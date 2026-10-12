@@ -151,6 +151,9 @@ struct Command: Identifiable {
         Command("file.reopen", "Reopen Closed Tab", .file, KeyCombo("t", shift: true)) { $0.reopen() },
         Command("file.openAddress", "Open Address…", .file, KeyCombo("l")) { $0.edit() },
         Command("file.closeTab", "Close Tab", .file, KeyCombo("w")) { $0.closeFront() },
+        // SPIKE: no key of its own — ⌘S is Hide Sidebar's, which saves
+        // instead while a document is in front (view.fold below).
+        Command("file.save", "Save", .file, nil) { $0.saveDocument() },
         Command("file.import", "Bring Things Over…", .file, nil) { $0.bringingIn = "" },
         Command("file.share", "Share…", .file, nil) { $0.share() },
         Command("file.print", "Print…", .file, KeyCombo("p")) { $0.printPage() },
@@ -160,7 +163,9 @@ struct Command: Identifiable {
         Command("edit.findPrevious", "Find Previous", .edit, KeyCombo("g", shift: true)) { $0.look(forward: false) },
 
         Command("view.sidebar", "Show Tabs in Sidebar", .view, KeyCombo("s", shift: true)) { $0.toggleSidebar() },
-        Command("view.fold", "Hide Sidebar or Tab Bar", .view, KeyCombo("s")) { $0.toggleFold() },
+        Command("view.fold", "Hide Sidebar or Tab Bar", .view, KeyCombo("s")) {
+            if $0.active?.document != nil { $0.saveDocument() } else { $0.toggleFold() }
+        },
         Command("view.reload", "Reload Page", .view, KeyCombo("r")) { $0.reload() },
         Command("view.reloadOrigin", "Reload Page From Origin", .view, KeyCombo("r", option: true)) { $0.reload(fromOrigin: true) },
         Command("view.reader", "Reading Mode", .view, KeyCombo("r", shift: true)) { $0.toggleReader() },

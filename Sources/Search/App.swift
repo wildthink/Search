@@ -67,6 +67,8 @@ struct SearchApp: App {
                 Divider()
                 Button("Close Tab") { browser.closeFront() }
                     .shortcut("file.closeTab")
+                Button("Save") { browser.saveDocument() }
+                    .shortcut("file.save")
             }
             CommandGroup(replacing: .printItem) {
                 Button("Share…") { browser.share() }
@@ -98,7 +100,10 @@ struct SearchApp: App {
                 // strip across the top.
                 Button(browser.prefs.sidebar
                        ? (browser.folded ? "Show Sidebar" : "Hide Sidebar")
-                       : (browser.folded ? "Show Tab Bar" : "Hide Tab Bar")) { browser.toggleFold() }
+                       : (browser.folded ? "Show Tab Bar" : "Hide Tab Bar")) {
+                    // SPIKE: ⌘S saves while a document is in front (see file.save).
+                    if browser.active?.document != nil { browser.saveDocument() } else { browser.toggleFold() }
+                }
                     .shortcut("view.fold")
                 Picker("Tabs Wear", selection: Binding(
                     get: { browser.prefs.glyph },
@@ -700,6 +705,12 @@ struct ContentView: View {
         guard !browser.fieldShowing, browser.editingTab == nil else { return }
         DispatchQueue.main.async {
             guard !browser.fieldShowing, browser.editingTab == nil else { return }
+            // A document has a view of its own to type in (see TabContent).
+            if let focus = browser.active?.document?.focus, let window = focus.window {
+                if let responder = window.firstResponder as? NSView, responder.isDescendant(of: focus) { return }
+                window.makeFirstResponder(focus)
+                return
+            }
             guard let web = browser.active?.web, let window = web.window else { return }
             if let responder = window.firstResponder as? NSView,
                responder === web || responder.isDescendant(of: web) { return }
@@ -1374,8 +1385,9 @@ struct ContentView: View {
         case "s" where shifted:
             browser.toggleSidebar()
         case "s" where !shifted:
-            // The column or the strip, folded away (see Fold.swift).
-            browser.toggleFold()
+            // The column or the strip, folded away (see Fold.swift) — or,
+            // SPIKE, the document in front saved.
+            if browser.active?.document != nil { browser.saveDocument() } else { browser.toggleFold() }
         case "b" where shifted:
             browser.bookmarkCurrent()
         case "," where !shifted:

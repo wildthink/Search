@@ -403,6 +403,7 @@ final class Browser: NSObject, ObservableObject {
 
     func openFind() {
         guard active?.isBlank == false else { return }
+        if let document = active?.document { return document.showFind() }
         finding = true
         findFocus += 1
     }
@@ -420,7 +421,7 @@ final class Browser: NSObject, ObservableObject {
     }
 
     func look(forward: Bool) {
-        guard let tab = active else {
+        guard let tab = active, tab.document == nil else {
             missed = false
             findResult = nil
             return
@@ -534,8 +535,8 @@ final class Browser: NSObject, ObservableObject {
 
     /// ⌘⇧M. Whatever is making noise in this tab stops making noise.
     func pauseMedia() {
-        guard let tab = active else { return }
-        tab.web.pauseAllMediaPlayback()
+        guard let tab = active, let web = tab.built else { return }
+        web.pauseAllMediaPlayback()
         announce("Paused")
     }
 
@@ -1859,7 +1860,7 @@ final class Browser: NSObject, ObservableObject {
         prefs.$autocorrect
             .dropFirst()
             .sink { [weak self] on in
-                guard let self, let web = active?.web else { return }
+                guard let self, active?.document == nil, let web = active?.web else { return }
                 let selector = NSSelectorFromString("toggleAutomaticSpellingCorrection:")
                 guard web.responds(to: selector) else { return }
                 // Toggling is all there is, so it is only sent when the two
@@ -2671,6 +2672,7 @@ final class Browser: NSObject, ObservableObject {
     /// behind; closing that blank tab closes the window.
     func close(_ tab: Tab) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        guard mayDiscard(tab) else { return }
         let pair = split(for: tab)
         let partner = pair.flatMap { pair in tabs.first { $0.id == pair.partner(of: tab.id) } }
         detachSplit(tab)
@@ -3519,7 +3521,34 @@ final class Browser: NSObject, ObservableObject {
     /// ⌘P. The system's own sheet, which is also where "save as PDF" lives.
     func printPage() {
         guard let tab = active, !tab.isBlank, let window = NSApp.keyWindow else { return }
-        Browser.printing(tab.web).runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+        let operation = tab.document?.printOperation() ?? Browser.printing(tab.web)
+        operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+    }
+
+    /// ⌘S: the document in front written back to its file.
+    func saveDocument() {
+        guard let document = active?.document else { return }
+        do { try document.save() } catch { NSAlert(error: error).runModal() }
+    }
+
+    /// A document with changes, asked about before it goes: Save, Don't
+    /// Save, or Cancel. Whether it may go.
+    func mayDiscard(_ tab: Tab) -> Bool {
+        guard let document = tab.document, document.dirty else { return true }
+        let alert = NSAlert()
+        alert.messageText = "Save the changes to “\(document.url.lastPathComponent)”?"
+        alert.informativeText = "Your changes will be lost if you don’t save them."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Don’t Save")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            do { try document.save(); return true } catch { NSAlert(error: error).runModal(); return false }
+        case .alertThirdButtonReturn:
+            return true
+        default:
+            return false
+        }
     }
 
     /// The print job for a page, or for one frame of it when WebKit names
@@ -3679,7 +3708,7 @@ final class Browser: NSObject, ObservableObject {
     private func lift(_ tab: Tab?, quietly: Bool, otherwise: Tab? = nil) {
         // A tab just put down with ⌘W has no page to lift a video out of, and
         // asking it would only build an empty view to ask.
-        guard let tab, !tab.isBlank, !tab.asleep, !floater.showing else {
+        guard let tab, !tab.isBlank, !tab.asleep, tab.document == nil, !floater.showing else {
             if let otherwise { lift(otherwise, quietly: quietly) }
             return
         }

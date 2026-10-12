@@ -23,6 +23,12 @@ final class Links: NSObject, NSApplicationDelegate {
     /// Quitting closes every window on the way out; that isn't a window
     /// closed for good, whose tabs would go (see Browsers.closing).
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // SPIKE: every document with changes asked about first; one Cancel
+        // and nothing quits.
+        let kept = MainActor.assumeIsolated {
+            Browsers.all.allSatisfy { browser in browser.tabs.allSatisfy { browser.mayDiscard($0) } }
+        }
+        guard kept else { return .terminateCancel }
         let waiting = MainActor.assumeIsolated {
             Browsers.quitting = true
             return Browser.cancelAllFileImports()

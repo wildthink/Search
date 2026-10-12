@@ -235,6 +235,18 @@ final class Tab: ObservableObject, Identifiable {
     /// is — a session of twenty tabs coming back is twenty objects, not
     /// twenty web views and their processes fighting the first frame.
     var web: PageView {
+        #if DEBUG
+        // SPIKE: every caller that still reaches for a page on a document
+        // tab is a seam not yet cut. Logged once per caller rather than
+        // trapped, so a run through the app lists them all.
+        if document != nil {
+            let stack = Thread.callStackSymbols.dropFirst().prefix(3).joined(separator: "\n  ")
+            let caller = Thread.callStackSymbols.dropFirst().first ?? ""
+            if Tab.leaks.insert(caller).inserted {
+                FileHandle.standardError.write(Data("⚠︎ tab.web on a document tab\(built == nil ? " (built it)" : ""):\n  \(stack)\n".utf8))
+            }
+        }
+        #endif
         if let built { return built }
         let view = build()
         built = view
@@ -243,6 +255,18 @@ final class Tab: ObservableObject, Identifiable {
     /// The web view if there is one yet, for the callers that must not be
     /// the reason there is.
     private(set) var built: PageView?
+    #if DEBUG
+    static var leaks = Set<String>()
+    #endif
+    /// A file shown in a view of Search's own instead of a page (see
+    /// TabContent.swift). While there is one, nothing here builds `web`.
+    @Published private(set) var document: TabContent?
+    /// What the stage shows for this tab: its document, or its page — and
+    /// no page while it is blank, asleep or floating (see Stage.swift).
+    var stageView: NSView? {
+        if let document { return document.view }
+        return isBlank || asleep || floating ? nil : web
+    }
     private var configuration: WKWebViewConfiguration
     let extensionReturn = ExtensionReturnNavigation()
 
@@ -336,7 +360,7 @@ final class Tab: ObservableObject, Identifiable {
     /// restoring the HTML gives you a page that looks right and does nothing,
     /// because every listener the page had was thrown away with it.
     func toggleReader(_ done: @escaping (Bool) -> Void) {
-        guard !isBlank else {
+        guard !isBlank, document == nil else {
             done(false)
             return
         }
@@ -701,6 +725,13 @@ final class Tab: ObservableObject, Identifiable {
     /// pushing in either direction.
     func magnify(to value: CGFloat) {
         let wanted = min(3, max(0.4, value))
+        if let document {
+            guard abs(wanted - document.zoom) > 0.004 else { return }
+            document.zoom = wanted
+            zoom = wanted
+            onZoom?(self, wanted)
+            return
+        }
         guard abs(wanted - web.pageZoom) > 0.004 else { return }
         web.pageZoom = wanted
         zoom = wanted
@@ -708,13 +739,13 @@ final class Tab: ObservableObject, Identifiable {
         onZoom?(self, wanted)
     }
 
-    func magnify(by factor: CGFloat) { magnify(to: web.pageZoom * factor) }
+    func magnify(by factor: CGFloat) { magnify(to: (document?.zoom ?? web.pageZoom) * factor) }
 
     /// ⌘0 undoes both kinds of zoom at once — whichever one you reached for —
     /// back to the size every site starts at.
     func resetZoom() {
         magnify(to: Tab.defaultZoom)
-        guard web.magnification != 1 else { return }
+        guard document == nil, web.magnification != 1 else { return }
         web.magnification = 1
         onZoom?(self, 1)
     }
@@ -814,8 +845,8 @@ final class Tab: ObservableObject, Identifiable {
         built?.evaluateInSearch(Veiling.style(css))
     }
 
-    func startPicking() { web.evaluateInSearch("window.__officeVeil && window.__officeVeil.on()") }
-    func stopPicking() { web.evaluateInSearch("window.__officeVeil && window.__officeVeil.off()") }
+    func startPicking() { built?.evaluateInSearch("window.__officeVeil && window.__officeVeil.on()") }
+    func stopPicking() { built?.evaluateInSearch("window.__officeVeil && window.__officeVeil.off()") }
 
     func foundSignIn() { onSignIn?(self) }
 
@@ -912,7 +943,7 @@ final class Tab: ObservableObject, Identifiable {
     }
 
     func unpeek(_ css: String) {
-        web.evaluateInSearch("window.__officeVeil && window.__officeVeil.unpeek(`\(escape(css))`)")
+        built?.evaluateInSearch("window.__officeVeil && window.__officeVeil.unpeek(`\(escape(css))`)")
     }
 
     private func escape(_ text: String) -> String {
@@ -939,6 +970,9 @@ final class Tab: ObservableObject, Identifiable {
         // extension's page opened with window.open is built from that
         // extension's configuration too. A tab with no page yet was just
         // built for where it is going, so it goes there.
+        // SPIKE: a document with changes isn't navigated away from. The
+        // real thing asks, as closing does (Browser.close).
+        if document?.dirty == true { NSSound.beep(); return }
         if let onCross, let here = built?.url ?? address,
            Browser.extensionHost(of: here) != Browser.extensionHost(of: url) {
             onCross(self, url)
@@ -963,7 +997,26 @@ final class Tab: ObservableObject, Identifiable {
         picture = nil
         cover = nil
         adoptIcon()
+        if adopt(document: url) { return }
+        document = nil
         web.open(url)
+    }
+
+    /// The file at `url` opened as a document, if it is one Search shows
+    /// itself (see Documents.handles). Whether it was.
+    private func adopt(document url: URL) -> Bool {
+        guard Documents.handles(url), let opened = try? Documents.open(url) else { return false }
+        // Whatever page the tab had goes: a tab shows one thing.
+        discard()
+        let name = url.lastPathComponent
+        opened.onDirty = { [weak self] dirty in
+            self?.title = dirty ? "\(name) — Edited" : name
+        }
+        document = opened
+        address = url
+        committed = url
+        title = name
+        return true
     }
 
     /// Brought back from the last session: everything the row needs to draw it,
@@ -986,6 +1039,8 @@ final class Tab: ObservableObject, Identifiable {
     func rest() {
         guard let url = address else { return }
         pending = url
+        // Asked about first, as closing is (Browser.close).
+        document = nil
         memory = nil
         picture = nil
         reading = 0
@@ -1043,6 +1098,7 @@ final class Tab: ObservableObject, Identifiable {
     /// half-filled form. A page that can't answer is treated as holding
     /// nothing: a PDF, an image, a page whose process has already gone.
     func unsaved(_ done: @escaping (Bool) -> Void) {
+        if let document { return done(document.dirty) }
         guard let built else { return done(false) }
         built.evaluateInSearch(
             "!!(window.__officeForms && window.__officeForms.unsaved && window.__officeForms.unsaved())"
@@ -1199,6 +1255,8 @@ final class Tab: ObservableObject, Identifiable {
     /// Asked anything at all, the page answers with one particular error, and
     /// the answer to that is to load it again.
     func revive() {
+        // A document has no page to have lost.
+        guard document == nil else { return }
         if stale {
             stale = false
             recoverFromCrash()
@@ -1244,6 +1302,7 @@ final class Tab: ObservableObject, Identifiable {
             uncover(after: 4)
         }
         picture = nil
+        if adopt(document: url) { return true }
         loadAndVerify(url, state: state)
         return true
     }
@@ -1270,6 +1329,7 @@ final class Tab: ObservableObject, Identifiable {
     /// True when the web view holds nothing — never loaded, or emptied —
     /// while the tab still names a page. The white page, in other words.
     var hollow: Bool {
+        if document != nil { return false }
         guard let built else { return address != nil }
         guard let there = built.url else { return address != nil }
         return there.absoluteString == "about:blank" && pending == nil && address != nil
@@ -1281,6 +1341,12 @@ final class Tab: ObservableObject, Identifiable {
         // A pin put down with ⌘W has no view left to reload; waking it is
         // the reload.
         guard !wake() else { return }
+        // A document is read from disk again — unless that would lose
+        // what was typed.
+        if let document {
+            if !document.dirty { try? document.revert() }
+            return
+        }
         reader = false
         // A file is read again with the folder it may read (see open).
         if let address, hollow || address.isFileURL {
@@ -1291,11 +1357,11 @@ final class Tab: ObservableObject, Identifiable {
             web.reload()
         }
     }
-    func stop() { web.stopLoading() }
+    func stop() { built?.stopLoading() }
     /// Straight through, every time. A page that has to be fetched again is
     /// fetched again — nothing is kept behind to make that look otherwise.
-    func back() { web.goBack() }
-    func forward() { web.goForward() }
+    func back() { if document == nil { web.goBack() } }
+    func forward() { if document == nil { web.goForward() } }
 
     /// Called when the tab is thrown away. Without it the view keeps running
     /// whatever the page left behind — timers, video, sockets.
@@ -1307,6 +1373,7 @@ final class Tab: ObservableObject, Identifiable {
         onSignIn = nil
         onField = nil
         onCredentials = nil
+        document = nil
         discard()
     }
 
