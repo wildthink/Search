@@ -196,6 +196,19 @@ cat > "$APP/Contents/Info.plist" <<PLIST
         <string>public.plain-text</string>
       </array>
     </dict>
+    <!-- Spreadsheets, shown by Quick Look (PreviewDocument.swift). -->
+    <dict>
+      <key>CFBundleTypeName</key><string>Spreadsheet</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>org.openxmlformats.spreadsheetml.sheet</string>
+        <string>com.microsoft.excel.xls</string>
+        <string>com.apple.iwork.numbers.sffnumbers</string>
+        <string>org.oasis-open.opendocument.spreadsheet</string>
+      </array>
+    </dict>
     <!-- SQLite databases, shown read only (DatabaseDocument.swift). -->
     <dict>
       <key>CFBundleTypeName</key><string>SQLite database</string>

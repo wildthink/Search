@@ -197,4 +197,29 @@ final class DocumentTests: XCTestCase {
         XCTAssertTrue(document.textView(view, clickedOnLink: URL(string: "#top", relativeTo: url)!, at: 0))
         XCTAssertEqual(opened.map { $0.isFileURL ? $0.lastPathComponent : $0.absoluteString }, ["https://example.com", "other.md"])
     }
+
+    // MARK: - spreadsheets, shown by Quick Look
+
+    func testSpreadsheetsAreShownByQuickLookAndNeverWritten() throws {
+        for name in ["sales.xlsx", "old.xls", "plan.numbers", "open.ods"] {
+            XCTAssertTrue(Documents.handles(URL(fileURLWithPath: "/tmp/\(name)")), name)
+        }
+        XCTAssertTrue(Documents.handles(URL(fileURLWithPath: "/tmp/table.csv")), "CSV opens too — as text, edited as text")
+
+        let url = try file("sales.xlsx", [0x50, 0x4B, 0x03, 0x04])
+        let before = try Data(contentsOf: url)
+        let document = try XCTUnwrap(try open(url) as? PreviewDocument)
+        XCTAssertEqual(document.previewing?.standardizedFileURL, url.standardizedFileURL)
+        XCTAssertFalse(document.dirty)
+        XCTAssertFalse(document.setReading(true))
+        XCTAssertNil(document.text, "nothing of it goes to the assistant")
+        XCTAssertThrowsError(try document.data(ofType: document.fileType ?? ""))
+        let saved = expectation(description: "saved")
+        document.save { ok in
+            XCTAssertTrue(ok)
+            saved.fulfill()
+        }
+        wait(for: [saved], timeout: 5)
+        XCTAssertEqual(try Data(contentsOf: url), before)
+    }
 }

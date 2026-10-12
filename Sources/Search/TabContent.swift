@@ -16,9 +16,10 @@ import UniformTypeIdentifiers
 // Not autosaved in place: a file opened in a browser is usually being looked
 // at, and is written only when you say so.
 //
-// One kind so far: text — Markdown, JSON, plain text — edited as text, with
+// Three kinds: text — Markdown, JSON, plain text — edited as text, with
 // Markdown read as it renders (MarkdownRender.swift) and JSON as a tree
-// (JSONTree.swift). SQLite and spreadsheets would each be another conformer.
+// (JSONTree.swift); SQLite databases, read only (DatabaseDocument.swift);
+// and spreadsheets, shown by Quick Look (PreviewDocument.swift).
 
 /// What a tab shows instead of a web page.
 protocol TabContent: NSDocument {
@@ -100,6 +101,7 @@ enum Documents {
         guard url.isFileURL, !url.hasDirectoryPath else { return false }
         if isDatabase(url) { return true }
         guard let type = type(of: url) else { return false }
+        if PreviewDocument.handles(type) { return true }
         if type.conforms(to: .html) || type.conforms(to: .svg) || type.conforms(to: .xml) { return false }
         return type.conforms(to: .json)
             || type.conforms(to: .markdown)
@@ -107,9 +109,14 @@ enum Documents {
     }
 
     static func open(_ url: URL) throws -> TabContent {
-        let document: TabContent = isDatabase(url)
-            ? try DatabaseDocument(contentsOf: url, ofType: "org.sqlite.sqlite3")
-            : try TextDocument(contentsOf: url, ofType: (type(of: url) ?? .plainText).identifier)
+        let type = type(of: url)
+        let document: TabContent = if isDatabase(url) {
+            try DatabaseDocument(contentsOf: url, ofType: "org.sqlite.sqlite3")
+        } else if let type, PreviewDocument.handles(type) {
+            try PreviewDocument(contentsOf: url, ofType: type.identifier)
+        } else {
+            try TextDocument(contentsOf: url, ofType: (type ?? .plainText).identifier)
+        }
         // Told when another app changes the file. A document with a window
         // of its own is put on the list by AppKit; one in a tab isn't.
         NSFileCoordinator.addFilePresenter(document)
