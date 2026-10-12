@@ -408,7 +408,7 @@ struct SettingsPanel: View {
                     Segmented(options: SidebarPosition.allCases.map { ($0, $0.title) }, selection: $prefs.sidePosition)
                 }
                 Rule()
-                Line("Hide the sidebar until the pointer reaches the edge", "The page takes the whole window; push against its \(prefs.sidePosition.rawValue) edge for the tabs. ⌘S keeps them out.") {
+                Line("Hide the sidebar until the pointer reaches the edge", "The page takes the whole window; push against its \(prefs.sidePosition.rawValue) edge for the tabs. ⌃⌘S keeps them out.") {
                     Switch(on: $prefs.sideHides)
                 }
             }
@@ -645,7 +645,7 @@ struct SettingsPanel: View {
                 Rule()
                 Shortcut("⇧⌘S", "Tabs in a sidebar")
                 Rule()
-                Shortcut("⌘S", "Fold the sidebar away")
+                Shortcut("⌃⌘S", "Fold the sidebar away")
                 Rule()
                 Shortcut("⇧⌘R", "Reading mode")
                 Rule()

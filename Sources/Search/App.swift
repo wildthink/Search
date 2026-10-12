@@ -69,6 +69,7 @@ struct SearchApp: App {
                     .shortcut("file.closeTab")
                 Button("Save") { browser.saveDocument() }
                     .shortcut("file.save")
+                    .disabled(browser.active?.document == nil)
             }
             CommandGroup(replacing: .printItem) {
                 Button("Share…") { browser.share() }
@@ -100,10 +101,7 @@ struct SearchApp: App {
                 // strip across the top.
                 Button(browser.prefs.sidebar
                        ? (browser.folded ? "Show Sidebar" : "Hide Sidebar")
-                       : (browser.folded ? "Show Tab Bar" : "Hide Tab Bar")) {
-                    // SPIKE: ⌘S saves while a document is in front (see file.save).
-                    if browser.active?.document != nil { browser.saveDocument() } else { browser.toggleFold() }
-                }
+                       : (browser.folded ? "Show Tab Bar" : "Hide Tab Bar")) { browser.toggleFold() }
                     .shortcut("view.fold")
                 Picker("Tabs Wear", selection: Binding(
                     get: { browser.prefs.glyph },
@@ -1384,10 +1382,13 @@ struct ContentView: View {
             }
         case "s" where shifted:
             browser.toggleSidebar()
+        case "s" where !shifted && flags.contains(.control):
+            // The column or the strip, folded away (see Fold.swift).
+            browser.toggleFold()
         case "s" where !shifted:
-            // The column or the strip, folded away (see Fold.swift) — or,
-            // SPIKE, the document in front saved.
-            if browser.active?.document != nil { browser.saveDocument() } else { browser.toggleFold() }
+            // The document in front saved; nothing on a page, which has had
+            // its turn at ⌘S already (pageFirst).
+            browser.saveDocument()
         case "b" where shifted:
             browser.bookmarkCurrent()
         case "," where !shifted:

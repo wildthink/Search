@@ -818,6 +818,24 @@ final class Bench {
             // Only on a SEARCH_PROBE run: it types into a page.
             guard Store.testing else { answer(["error": "key only works on a --test run — it would type into your page"]); return }
             guard let tab = find(request, in: browser), let text = request["text"] as? String else { answer(missing(request)); return }
+            // A document types into its own view (see TabContent), which is
+            // on the stage rather than in the bench's room.
+            if let focus = tab.document?.focus {
+                focus.window?.makeFirstResponder(focus)
+                for character in text {
+                    let chars = String(character)
+                    guard let event = NSEvent.keyEvent(
+                        with: .keyDown, location: .zero, modifierFlags: [],
+                        timestamp: ProcessInfo.processInfo.systemUptime,
+                        windowNumber: focus.window?.windowNumber ?? 0, context: nil,
+                        characters: chars, charactersIgnoringModifiers: chars,
+                        isARepeat: false, keyCode: Bench.keyCode(for: character)
+                    ) else { continue }
+                    focus.keyDown(with: event)
+                }
+                answer(["typed": text, "document": true])
+                return
+            }
             house(tab)
             let view = tab.web
             view.window?.makeFirstResponder(view)

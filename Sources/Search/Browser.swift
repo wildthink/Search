@@ -283,7 +283,7 @@ final class Browser: NSObject, ObservableObject {
         return searchURL(for: typed)
     }
 
-    /// ⌘S: the column folded away, and slid out over the page for a look
+    /// ⌃⌘S: the column folded away, and slid out over the page for a look
     /// while it is (see Fold.swift).
     @Published var folded = false
     @Published var peeking = false
@@ -3326,6 +3326,12 @@ final class Browser: NSObject, ObservableObject {
         // An extension's own page is served only to a view built from that
         // extension's configuration.
         let url = Browser.page(url)
+        // A file already open as a document isn't opened twice: its tab is
+        // brought up instead — Duplicate Tab on a document included.
+        if Documents.handles(url), let held = Documents.holder(of: url) {
+            if foreground { bringUp(held.tab, in: held.browser) }
+            return held.tab
+        }
         let page = Browser.extensionConfiguration(for: url)
         // A new tab is in this window's space, with its sign-ins — not the
         // space of whichever window is in front, when this one is behind it.
@@ -3523,6 +3529,14 @@ final class Browser: NSObject, ObservableObject {
         guard let tab = active, !tab.isBlank, let window = NSApp.keyWindow else { return }
         let operation = tab.document?.printOperation() ?? Browser.printing(tab.web)
         operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+    }
+
+    /// A tab brought to the front, in whichever window holds it.
+    func bringUp(_ tab: Tab, in owner: Browser) {
+        owner.select(tab)
+        guard owner !== self else { return }
+        Browsers.show(owner)
+        NSApp.activate()
     }
 
     /// ⌘S: the document in front written back to its file.
@@ -3800,6 +3814,11 @@ final class Browser: NSObject, ObservableObject {
         // From a private tab, the new one is private too, as for ⌘-click.
         tab.onMiddleClick = { [weak self] tab, url in self?.open(url, foreground: false, from: tab, mayWait: true) }
         tab.onCross = { [weak self] tab, url in self?.replace(tab, going: url) }
+        tab.onDocument = { [weak self] tab, url in
+            guard let self, let held = Documents.holder(of: url, except: tab) else { return false }
+            bringUp(held.tab, in: held.browser)
+            return true
+        }
 
         // The caret in a sign-in box: the accounts kept for this site hang
         // from the box, and go when the caret does. Nothing is filled on

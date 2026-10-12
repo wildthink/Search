@@ -54,6 +54,18 @@ enum Documents {
     static func open(_ url: URL) throws -> TabContent {
         try TextDocument(url: url)
     }
+
+    /// The tab, in any window, already holding the file at `url` — one tab
+    /// per file, so two editors never write over each other.
+    @MainActor static func holder(of url: URL, except: Tab? = nil) -> (browser: Browser, tab: Tab)? {
+        let wanted = url.standardizedFileURL.resolvingSymlinksInPath()
+        for browser in Browsers.all where browser.extensionPopup == nil {
+            if let tab = browser.tabs.first(where: {
+                $0 !== except && $0.document?.url.standardizedFileURL.resolvingSymlinksInPath() == wanted
+            }) { return (browser, tab) }
+        }
+        return nil
+    }
 }
 
 private extension UTType {

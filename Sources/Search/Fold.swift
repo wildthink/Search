@@ -1,6 +1,6 @@
 import SwiftUI
 
-// The column of tabs, folded away with ⌘S.
+// The column of tabs, folded away with ⌃⌘S.
 //
 // The column is two hundred and some points the page never gets back, even
 // while all you do is read. Folded, the page takes the whole window. The tabs
@@ -19,11 +19,11 @@ import SwiftUI
 //
 // Unless that is the reason: Settings can keep the column folded for good,
 // Arc's way, and then the fold is where it rests, at launch and after every
-// change of layout. ⌘S still brings it out to stay, and puts it away again.
+// change of layout. ⌃⌘S still brings it out to stay, and puts it away again.
 // Folded like that, the edge is met far more often by a hand on its way
 // somewhere else — the Dock, the window beside — than by one reaching for
 // the tabs, so the column waits for the pointer to settle there a moment
-// before it comes. Folded by hand with ⌘S, it comes at once, as it always did.
+// before it comes. Folded by hand with ⌃⌘S, it comes at once, as it always did.
 //
 // The edge isn't only where the pointer stops. A hand flung at it, with the
 // window away from the screen's own edge, sails past it off the window, and
@@ -42,7 +42,7 @@ import SwiftUI
 // menu bar just above, so the strip always waits for the pointer to settle.
 
 extension Browser {
-    /// ⌘S. The column, or the strip across the top, out of the way, or back.
+    /// ⌃⌘S. The column, or the strip across the top, out of the way, or back.
     func toggleFold() {
         peeking = false
         withAnimation(Motion.glide) { folded.toggle() }

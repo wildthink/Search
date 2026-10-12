@@ -1126,7 +1126,7 @@ struct OneClick: ViewModifier {
 
 /// A click on a tab's cross closes it — taken by a real view laid over the
 /// cross rather than by a SwiftUI tap. Out over the page, in the strip folded
-/// away with ⌘S, the tap never came: the cross showed under the pointer and
+/// away with ⌃⌘S, the tap never came: the cross showed under the pointer and
 /// clicking it did nothing (Drice). A view of AppKit's own is handed the
 /// press by AppKit itself, as the middle button's is (MiddleClick), and it
 /// answers only while the cross is there to be pressed, only to the left

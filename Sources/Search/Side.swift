@@ -560,7 +560,7 @@ private struct SideFoot: View {
 
 /// The pinned squares' grid, every cell laid out at once. A lazy grid makes
 /// its cells only once the column is on screen, where the column's slide
-/// can't take them along: folded with ⌘S and brought back, the squares stood
+/// can't take them along: folded with ⌃⌘S and brought back, the squares stood
 /// in place while the column came in beneath them. A dozen squares need no
 /// laziness.
 private struct PinGrid: Layout {

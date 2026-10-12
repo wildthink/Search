@@ -499,6 +499,9 @@ final class Tab: ObservableObject, Identifiable {
     /// WebKit keeps each kind of view to its own pages, so the tab has to be
     /// swapped for one built for the address (see Browser.replace).
     var onCross: ((Tab, URL) -> Void)?
+    /// A file another tab already holds as a document: that tab brought up
+    /// instead (see Documents.holder). Whether it was.
+    var onDocument: ((Tab, URL) -> Bool)?
     /// The extension whose store page has its own "Add to Search" button in
     /// place — so the bar at the bottom of the window doesn't offer it twice.
     @Published var storePlaced: String?
@@ -973,6 +976,7 @@ final class Tab: ObservableObject, Identifiable {
         // SPIKE: a document with changes isn't navigated away from. The
         // real thing asks, as closing does (Browser.close).
         if document?.dirty == true { NSSound.beep(); return }
+        if Documents.handles(url), let onDocument, onDocument(self, url) { return }
         if let onCross, let here = built?.url ?? address,
            Browser.extensionHost(of: here) != Browser.extensionHost(of: url) {
             onCross(self, url)

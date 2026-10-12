@@ -6,7 +6,7 @@ import SwiftUI
 //
 // Off unless asked for — Settings › Tabs, or Bookmarks › Show Bookmarks Bar
 // — since the page gives up a strip of its height to it. It goes with the
-// tabs when they fold away (⌘S) and when a video takes the screen.
+// tabs when they fold away (⌃⌘S) and when a video takes the screen.
 
 struct BookmarksBar: View {
     @ObservedObject var browser: Browser
