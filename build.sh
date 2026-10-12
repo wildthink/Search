@@ -196,6 +196,32 @@ cat > "$APP/Contents/Info.plist" <<PLIST
         <string>public.plain-text</string>
       </array>
     </dict>
+    <!-- SQLite databases, shown read only (DatabaseDocument.swift). -->
+    <dict>
+      <key>CFBundleTypeName</key><string>SQLite database</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array><string>org.sqlite.sqlite3</string></array>
+    </dict>
+  </array>
+  <!-- The system declares no type for SQLite: imported, so an app that
+       does declare one wins. .db is left out, being many things; Search
+       still opens one whose first bytes say it is SQLite. -->
+  <key>UTImportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key><string>org.sqlite.sqlite3</string>
+      <key>UTTypeDescription</key><string>SQLite database</string>
+      <key>UTTypeConformsTo</key>
+      <array><string>public.database</string><string>public.data</string></array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array><string>sqlite</string><string>sqlite3</string><string>db3</string><string>s3db</string><string>sl3</string></array>
+        <key>public.mime-type</key><string>application/vnd.sqlite3</string>
+      </dict>
+    </dict>
   </array>
   <!-- A browser goes wherever it is pointed, including at http sites and at
        whatever is running on localhost. -->

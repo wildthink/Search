@@ -57,6 +57,9 @@ extension TabContent {
     /// where it asks before writing over a file another app changed since,
     /// and where a failure is put up as a sheet on the tab's window.
     func save(then done: @escaping (Bool) -> Void) {
+        // Nothing changed, nothing written: ⌘S on a document as it was
+        // opened, or on one that can't be changed (a database).
+        guard isDocumentEdited else { return done(true) }
         let saved = Saved { [weak self] ok in
             if let self { onDirty?(isDocumentEdited) }
             done(ok)
@@ -94,7 +97,9 @@ enum Documents {
     /// Files Search shows in a view of its own rather than handing to WebKit.
     /// HTML and its kin are pages, and stay WebKit's, as do SVG and PDF.
     static func handles(_ url: URL) -> Bool {
-        guard url.isFileURL, !url.hasDirectoryPath, let type = type(of: url) else { return false }
+        guard url.isFileURL, !url.hasDirectoryPath else { return false }
+        if isDatabase(url) { return true }
+        guard let type = type(of: url) else { return false }
         if type.conforms(to: .html) || type.conforms(to: .svg) || type.conforms(to: .xml) { return false }
         return type.conforms(to: .json)
             || type.conforms(to: .markdown)
@@ -102,7 +107,9 @@ enum Documents {
     }
 
     static func open(_ url: URL) throws -> TabContent {
-        let document = try TextDocument(contentsOf: url, ofType: (type(of: url) ?? .plainText).identifier)
+        let document: TabContent = isDatabase(url)
+            ? try DatabaseDocument(contentsOf: url, ofType: "org.sqlite.sqlite3")
+            : try TextDocument(contentsOf: url, ofType: (type(of: url) ?? .plainText).identifier)
         // Told when another app changes the file. A document with a window
         // of its own is put on the list by AppKit; one in a tab isn't.
         NSFileCoordinator.addFilePresenter(document)
@@ -110,6 +117,15 @@ enum Documents {
         // rendered, and as a tree; ⇧⌘R for the source.
         _ = document.setReading(true)
         return document
+    }
+
+    /// A SQLite database: named as one, and starting the way every one
+    /// does. The system knows no type for them, and .db is many things.
+    static func isDatabase(_ url: URL) -> Bool {
+        guard ["sqlite", "sqlite3", "db", "db3", "s3db", "sl3"].contains(url.pathExtension.lowercased()),
+              let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        return (try? handle.read(upToCount: 16)) == Data("SQLite format 3\u{0}".utf8)
     }
 
     private static func type(of url: URL) -> UTType? {
