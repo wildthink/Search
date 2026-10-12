@@ -421,6 +421,12 @@ final class Bench {
 
         case "text":
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
+            // A document's text is its own (see TabContent), with whether it
+            // holds changes not yet saved.
+            if let document = tab.document {
+                answer(["text": document.text ?? "", "edited": document.dirty])
+                return
+            }
             house(tab)
             tab.web.evaluateJavaScript("document.body ? document.body.innerText : ''") { value, error in
                 MainActor.assumeIsolated {
@@ -819,21 +825,27 @@ final class Bench {
             guard Store.testing else { answer(["error": "key only works on a --test run — it would type into your page"]); return }
             guard let tab = find(request, in: browser), let text = request["text"] as? String else { answer(missing(request)); return }
             // A document types into its own view (see TabContent), which is
-            // on the stage rather than in the bench's room.
+            // on the stage rather than in the bench's room — through the
+            // app's event queue, since an undo group closes only at the end
+            // of a real event, and NSDocument counts a change only then.
             if let focus = tab.document?.focus {
                 focus.window?.makeFirstResponder(focus)
                 for character in text {
                     let chars = String(character)
-                    guard let event = NSEvent.keyEvent(
-                        with: .keyDown, location: .zero, modifierFlags: [],
-                        timestamp: ProcessInfo.processInfo.systemUptime,
-                        windowNumber: focus.window?.windowNumber ?? 0, context: nil,
-                        characters: chars, charactersIgnoringModifiers: chars,
-                        isARepeat: false, keyCode: Bench.keyCode(for: character)
-                    ) else { continue }
-                    focus.keyDown(with: event)
+                    for type in [NSEvent.EventType.keyDown, .keyUp] {
+                        guard let event = NSEvent.keyEvent(
+                            with: type, location: .zero, modifierFlags: [],
+                            timestamp: ProcessInfo.processInfo.systemUptime,
+                            windowNumber: focus.window?.windowNumber ?? 0, context: nil,
+                            characters: chars, charactersIgnoringModifiers: chars,
+                            isARepeat: false, keyCode: Bench.keyCode(for: character)
+                        ) else { continue }
+                        NSApp.postEvent(event, atStart: false)
+                    }
                 }
-                answer(["typed": text, "document": true])
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    answer(["typed": text, "document": true, "edited": tab.document?.dirty ?? false])
+                }
                 return
             }
             house(tab)

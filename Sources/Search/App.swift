@@ -1019,6 +1019,13 @@ struct ContentView: View {
         return Browsers.acting === browser
     }
 
+    /// Whether the keyboard is in the document's own view, rather than the
+    /// address field or a panel over it.
+    static func typing(in document: TabContent) -> Bool {
+        guard let responder = document.focus.window?.firstResponder as? NSView else { return false }
+        return responder === document.focus || responder.isDescendant(of: document.focus)
+    }
+
     /// The same handling the key monitor gives an event, for the bench to
     /// put a key through the app's own path — each window's own.
     static var keyHooks: [ObjectIdentifier: (NSEvent) -> NSEvent?] = [:]
@@ -1397,6 +1404,11 @@ struct ContentView: View {
             browser.toggleHiding()
         case "u" where shifted:
             browser.reviewing.toggle()
+        case "z" where browser.active?.document.map({ ContentView.typing(in: $0) }) == true:
+            // A document undoes with its own undo manager. The menu's Undo
+            // asks the window's, which a tab's document isn't part of.
+            let undo = browser.active?.document?.undoManager
+            if shifted { undo?.redo() } else { undo?.undo() }
         case "z" where !shifted:
             // Only while pointing. Everywhere else undo belongs to the page.
             guard browser.veiling else { return false }

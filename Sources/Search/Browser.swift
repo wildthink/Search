@@ -2672,7 +2672,11 @@ final class Browser: NSObject, ObservableObject {
     /// behind; closing that blank tab closes the window.
     func close(_ tab: Tab) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
-        guard mayDiscard(tab) else { return }
+        guard tab.document?.dirty != true else {
+            return mayDiscard(tab) { [weak self, weak tab] in
+                if let self, let tab { close(tab) }
+            }
+        }
         let pair = split(for: tab)
         let partner = pair.flatMap { pair in tabs.first { $0.id == pair.partner(of: tab.id) } }
         detachSplit(tab)
@@ -3527,7 +3531,7 @@ final class Browser: NSObject, ObservableObject {
     /// ⌘P. The system's own sheet, which is also where "save as PDF" lives.
     func printPage() {
         guard let tab = active, !tab.isBlank, let window = NSApp.keyWindow else { return }
-        let operation = tab.document?.printOperation() ?? Browser.printing(tab.web)
+        let operation = tab.document.flatMap { try? $0.printOperation(withSettings: [:]) } ?? Browser.printing(tab.web)
         operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
     }
 
@@ -3541,14 +3545,22 @@ final class Browser: NSObject, ObservableObject {
 
     /// ⌘S: the document in front written back to its file.
     func saveDocument() {
-        guard let document = active?.document else { return }
-        do { try document.save() } catch { NSAlert(error: error).runModal() }
+        active?.document?.save { _ in }
+    }
+
+    /// The first tab, in any window, holding a document with changes.
+    static var unsaved: (browser: Browser, tab: Tab)? {
+        for browser in Browsers.all {
+            if let tab = browser.tabs.first(where: { $0.document?.dirty == true }) { return (browser, tab) }
+        }
+        return nil
     }
 
     /// A document with changes, asked about before it goes: Save, Don't
-    /// Save, or Cancel. Whether it may go.
-    func mayDiscard(_ tab: Tab) -> Bool {
-        guard let document = tab.document, document.dirty else { return true }
+    /// Save, or Cancel. `go` runs once it may go — after the save, which
+    /// takes a moment — and never on Cancel or a save that failed.
+    func mayDiscard(_ tab: Tab, then go: @escaping () -> Void) {
+        guard let document = tab.document, document.dirty else { return go() }
         let alert = NSAlert()
         alert.messageText = "Save the changes to “\(document.url.lastPathComponent)”?"
         alert.informativeText = "Your changes will be lost if you don’t save them."
@@ -3557,11 +3569,13 @@ final class Browser: NSObject, ObservableObject {
         alert.addButton(withTitle: "Don’t Save")
         switch alert.runModal() {
         case .alertFirstButtonReturn:
-            do { try document.save(); return true } catch { NSAlert(error: error).runModal(); return false }
+            document.save { saved in if saved { go() } }
         case .alertThirdButtonReturn:
-            return true
+            // Its changes let go of, so nothing asks about them again.
+            document.updateChangeCount(.changeCleared)
+            go()
         default:
-            return false
+            break
         }
     }
 

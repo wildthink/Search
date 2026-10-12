@@ -260,7 +260,10 @@ final class Tab: ObservableObject, Identifiable {
     #endif
     /// A file shown in a view of Search's own instead of a page (see
     /// TabContent.swift). While there is one, nothing here builds `web`.
-    @Published private(set) var document: TabContent?
+    @Published private(set) var document: TabContent? {
+        // Let go of, it stops watching its file (NSDocument.close).
+        didSet { if oldValue !== document { oldValue?.close() } }
+    }
     /// What the stage shows for this tab: its document, or its page — and
     /// no page while it is blank, asleep or floating (see Stage.swift).
     var stageView: NSView? {
