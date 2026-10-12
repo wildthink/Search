@@ -17,8 +17,8 @@ import UniformTypeIdentifiers
 // at, and is written only when you say so.
 //
 // One kind so far: text — Markdown, JSON, plain text — edited as text, with
-// Markdown read as it renders (MarkdownRender.swift). A JSON tree, SQLite and
-// spreadsheets would each be another conformer.
+// Markdown read as it renders (MarkdownRender.swift) and JSON as a tree
+// (JSONTree.swift). SQLite and spreadsheets would each be another conformer.
 
 /// What a tab shows instead of a web page.
 protocol TabContent: NSDocument {
@@ -106,7 +106,8 @@ enum Documents {
         // Told when another app changes the file. A document with a window
         // of its own is put on the list by AppKit; one in a tab isn't.
         NSFileCoordinator.addFilePresenter(document)
-        // Opened in a browser, Markdown is for reading first; ⇧⌘R for its source.
+        // Opened in a browser, Markdown and JSON are for reading first —
+        // rendered, and as a tree; ⇧⌘R for the source.
         _ = document.setReading(true)
         return document
     }
@@ -132,16 +133,22 @@ private extension UTType {
     static let markdown = UTType("net.daringfireball.markdown") ?? .plainText
 }
 
-/// A text file, edited as text — and Markdown, read as it renders.
+/// A text file, edited as text — Markdown read as it renders, and JSON as
+/// a tree.
 final class TextDocument: NSDocument, TabContent, NSTextViewDelegate {
-    /// The stage's view: the source and, for Markdown, the reading view
-    /// over it, one shown at a time.
+    /// The stage's view: the source and, for Markdown and JSON, the reading
+    /// view over it, one shown at a time.
     private let page = NSView()
     private let scroll = NSTextView.scrollableTextView()
     private let editor = DocumentTextView()
     private let reading = NSTextView.scrollableTextView()
     private var reader: NSTextView { reading.documentView as! NSTextView }
+    private let tree = JSONTree()
     private(set) var isReading = false
+
+    /// What reading it means, by the kind of file.
+    private enum Kind { case markdown, json, text }
+    private var kind = Kind.text
     var onLink: ((URL) -> Void)?
     /// The file's own encoding, written back the way it was read.
     private var encoding: String.Encoding = .utf8
@@ -149,9 +156,12 @@ final class TextDocument: NSDocument, TabContent, NSTextViewDelegate {
     var onDirty: ((Bool) -> Void)?
 
     var view: NSView { page }
-    var focus: NSView { isReading ? reader : editor }
-    /// The view on show, for print and find.
-    private var shown: NSTextView { isReading ? reader : editor }
+    var focus: NSView { shown }
+    /// The view on show, for the keyboard and print.
+    private var shown: NSView {
+        guard isReading else { return editor }
+        return kind == .json ? tree.outline : reader
+    }
     var text: String? { editor.string }
 
     override init() {
@@ -195,7 +205,9 @@ final class TextDocument: NSDocument, TabContent, NSTextViewDelegate {
         reading.maxMagnification = 3
         reading.isHidden = true
 
-        for each in [scroll, reading] {
+        tree.scroll.isHidden = true
+
+        for each in [scroll, reading, tree.scroll] {
             each.frame = page.bounds
             each.autoresizingMask = [.width, .height]
             page.addSubview(each)
@@ -227,7 +239,11 @@ final class TextDocument: NSDocument, TabContent, NSTextViewDelegate {
             encoding = .isoLatin1
             editor.string = String(data: data, encoding: .isoLatin1) ?? ""
         }
-        editor.font = UTType(typeName)?.conforms(to: .json) == true
+        let type = UTType(typeName)
+        kind = type?.conforms(to: .json) == true ? .json
+            : type?.conforms(to: .markdown) == true ? .markdown
+            : .text
+        editor.font = kind == .json
             ? .monospacedSystemFont(ofSize: 12, weight: .regular)
             : .systemFont(ofSize: 14)
         undoManager?.removeAllActions()
@@ -302,29 +318,38 @@ final class TextDocument: NSDocument, TabContent, NSTextViewDelegate {
         set {
             scroll.magnification = newValue
             reading.magnification = newValue
+            tree.scroll.magnification = newValue
         }
     }
 
     func showFind() {
         let item = NSMenuItem()
         item.tag = NSTextFinder.Action.showFindInterface.rawValue
-        shown.window?.makeFirstResponder(shown)
-        shown.performTextFinderAction(item)
+        // A tree has no find bar of its own: the source does.
+        if isReading, kind == .json { _ = setReading(false) }
+        guard let text = shown as? NSTextView else { return }
+        text.window?.makeFirstResponder(text)
+        text.performTextFinderAction(item)
     }
 
     func setReading(_ on: Bool) -> Bool {
-        guard fileType.flatMap(UTType.init)?.conforms(to: .markdown) == true else { return false }
+        guard kind != .text else { return false }
         isReading = on
         // Rendered from what is in the editor, changes not yet saved included.
         if on { render() }
-        reading.isHidden = !on
+        reading.isHidden = !(on && kind == .markdown)
+        tree.scroll.isHidden = !(on && kind == .json)
         scroll.isHidden = on
         if let window = page.window { window.makeFirstResponder(shown) }
         return true
     }
 
     private func render() {
-        reader.textStorage?.setAttributedString(MarkdownRender.attributed(editor.string, base: fileURL))
+        switch kind {
+        case .markdown: reader.textStorage?.setAttributedString(MarkdownRender.attributed(editor.string, base: fileURL))
+        case .json: tree.show(editor.string)
+        case .text: break
+        }
     }
 }
 

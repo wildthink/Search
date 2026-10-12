@@ -109,16 +109,59 @@ final class DocumentTests: XCTestCase {
 
     // MARK: - Markdown, read as it renders
 
-    func testMarkdownOpensInTheReadingViewAndOtherTextDoesNot() throws {
+    func testMarkdownAndJSONOpenToReadAndPlainTextDoesNot() throws {
         let markdown = try open(try file("notes.md", "# Notes\n"))
         XCTAssertTrue(markdown.isReading)
         XCTAssertTrue(markdown.setReading(false))
         XCTAssertFalse(markdown.isReading)
 
         let json = try open(try file("data.json", "{}\n"))
-        XCTAssertFalse(json.isReading)
-        XCTAssertFalse(json.setReading(true), "JSON has only its source")
-        XCTAssertFalse(json.isReading)
+        XCTAssertTrue(json.isReading, "JSON opens as a tree")
+        XCTAssertTrue(json.focus is NSOutlineView)
+
+        let text = try open(try file("readme.txt", "plain\n"))
+        XCTAssertFalse(text.isReading)
+        XCTAssertFalse(text.setReading(true), "plain text has only its source")
+        XCTAssertFalse(text.isReading)
+    }
+
+    // MARK: - JSON, read as a tree
+
+    func testJSONShowsItsKeysAndSaysWhatEachBranchHolds() {
+        let tree = JSONTree()
+        tree.show(#"{"user": {"name": "Ada", "tags": ["a", "b"], "admin": true, "age": 36, "note": null}}"#)
+        let outline = tree.outline
+        // The top level open: user and what is in it.
+        let user = outline.item(atRow: 0) as? JSONTree.Node
+        XCTAssertEqual(user?.key, "user")
+        XCTAssertEqual(user?.summary, "{ 5 keys }")
+        XCTAssertTrue(outline.isItemExpanded(user))
+        let rows = (1..<outline.numberOfRows).compactMap { outline.item(atRow: $0) as? JSONTree.Node }
+        XCTAssertEqual(rows.map(\.key), ["name", "tags", "admin", "age", "note"], "in the file's order")
+        XCTAssertEqual(rows.map(\.summary), ["“Ada”", "[ 2 items ]", "true", "36", "null"])
+
+        let tags = rows[1]
+        outline.expandItem(tags)
+        let second = outline.child(1, ofItem: tags) as! JSONTree.Node
+        XCTAssertEqual(tree.path(to: second), "user.tags[1]")
+    }
+
+    func testJSONThatIsNotValidSaysSoInsteadOfAHalfTree() {
+        let tree = JSONTree()
+        tree.show(#"{"user": "#)
+        XCTAssertEqual(tree.outline.numberOfRows, 0)
+        XCTAssertTrue(tree.outline.isHidden)
+    }
+
+    func testTheTreeKeepsWhatWasOpenWhenTheSourceChanges() {
+        let tree = JSONTree()
+        tree.show(#"{"a": {"b": {"c": 1}}}"#)
+        let a = tree.outline.item(atRow: 0)
+        let b = tree.outline.child(0, ofItem: a)
+        tree.outline.expandItem(b)
+        XCTAssertEqual(tree.outline.numberOfRows, 3)
+        tree.show(#"{"a": {"b": {"c": 2, "d": 3}}}"#)
+        XCTAssertEqual(tree.outline.numberOfRows, 4, "a and b still open, with b's new key")
     }
 
     func testMarkdownRendersItsBlocksAndKeepsItsLinks() {
