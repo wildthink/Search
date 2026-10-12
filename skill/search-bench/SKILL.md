@@ -25,7 +25,7 @@ Every command goes to one world. Pass the same flag on every call.
 | `--world NAME` | World `NAME` (lowercase letters, digits, hyphens) | `~/Library/Application Support/Search (NAME)/` |
 | none | The installed browser they actually use | `~/Library/Application Support/Search/` |
 
-Use a test world for any work that changes chrome, installs or removes extensions, resizes, sends real key events, or selects a tab. A `swift build` binary under `.build/` is always world `test`, even with no `SEARCH_PROBE`. `./fresh.sh` launches `build/Search.app` with `SEARCH_PROBE` set, which is also a test world.
+Use a test world for any work that changes chrome, installs or removes extensions, resizes, sends real key events, or selects a tab. A `swift build` binary under `.build/` is always world `test`, even with no `SEARCH_PROBE`. `./fresh.sh` launches `build/debug/Search.app` (or `build/Search.app` with `SEARCH_BUILD=release`) with `SEARCH_PROBE` set, which is also a test world.
 
 `select`, `key`, `resize`, and `ext-answer` fail on the installed browser. `--yes` skips an extension's install dialog only on a test run.
 
@@ -33,7 +33,7 @@ On the installed browser, only when they asked you to drive that window: `tabs`,
 
 ## Get a test world listening
 
-One process per world. Quit a process only after its executable path is this repo's `build/Search.app` or a `.build/` binary, or its environment contains `SEARCH_PROBE`. Leave `/Applications/Search.app` alone. `killall`, quitting by the name Search, and `osascript` quit hit the installed app too: same bundle id, same process name.
+One process per world. Quit a process only after its executable path is this repo's `build/debug/Search.app`, `build/Search.app` or a `.build/` binary, or its environment contains `SEARCH_PROBE`. Leave `/Applications/Search.app` alone. `killall`, quitting by the name Search, and `osascript` quit hit the installed app too: same bundle id, same process name.
 
 1. `./bench --test tabs` (or `--world NAME`). A tab list means that world is listening. Do not launch another.
 2. If it prints `Search isn't listening`:
@@ -46,7 +46,7 @@ One process per world. Quit a process only after its executable path is this rep
 
 If `./bench tabs` (no flag) is not listening, ask them to turn on **Settings › General › Let a script drive Search**. Do not write defaults for the installed app.
 
-`./fresh.sh` builds `build/Search.app` when that bundle is missing. It opens a world
+`./fresh.sh` builds `build/debug/Search.app` (`./build.sh debug`) when that bundle is missing; after changing code, run `./build.sh debug` yourself. Use `SEARCH_BUILD=release` and `./build.sh` only for timings. It opens a world
 whose `bench` switch is on, hidden, since a test run that comes to the front trips the
 probe's guard and then refuses every command for the rest of that run. Write the switch
 before launching, not after, or the world opens in front and has to be thrown away.

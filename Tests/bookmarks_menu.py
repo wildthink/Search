@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The Bookmarks menu keeps its bookmarks while a tab's title keeps changing.
 
-Build first (`./build.sh`), then `python3 Tests/bookmarks_menu.py`. SwiftUI
+Build first (`./build.sh debug`), then `python3 Tests/bookmarks_menu.py`. SwiftUI
 updates an open menu through its own delegate whenever anything it shows may
 have changed, which took out the bookmarks Search adds after its items: a
 download page counting its speed in its title emptied the menu under the

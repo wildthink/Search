@@ -83,6 +83,7 @@ So anyone can read exactly what a browser handling their passwords and history i
 - macOS 14 or later, Xcode 16 / Swift 6 toolchain
 - `swift build` — runs the app straight from the SwiftPM binary
 - `./build.sh` — assembles a real, double-clickable `Search.app` in `build/`, ad-hoc signed so it runs on your own Mac
+- `./build.sh debug` — the same app unoptimised, in `build/debug/`: what `./fresh.sh`, the bench and `Tests/*.py` run by default. A change rebuilds in seconds rather than a minute and a half, and the release app in `build/` can stay open meanwhile. Time things on a release build (`SEARCH_BUILD=release`).
 
 A build you make yourself won't be notarized or carry Office Commun's Developer ID, so the first launch needs a right-click → Open (or an allow in System Settings → Privacy & Security). That's expected — it's the same thing that happens with any app that isn't from the App Store or a notarized DMG. Your own build also keeps its passwords apart from a signed Search's: the keychain tells the two apart by their signatures.
 
@@ -114,7 +115,7 @@ Turn on **Settings › General › Let a script drive Search** and the running a
 
 Bench tabs are never selected for you, never enter the session or the history, and go when the script says so. It is how this browser is tested while somebody is using it.
 
-`python3 Tests/split_view.py`, after `./build.sh`, checks Split View through the app's own model in a hidden test run with its own settings and files, all removed afterwards. It never makes or shows a window; what can only be seen (dragging onto a page's edge, the divider under the pointer, the motion) is checked by hand on a release candidate.
+`python3 Tests/split_view.py`, after `./build.sh debug`, checks Split View through the app's own model in a hidden test run with its own settings and files, all removed afterwards. It never makes or shows a window; what can only be seen (dragging onto a page's edge, the divider under the pointer, the motion) is checked by hand on a release candidate.
 
 ### Contributing
 

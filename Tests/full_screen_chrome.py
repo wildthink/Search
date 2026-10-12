@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The column around a page's full screen, in a hidden probe.
 
-Build first (`./build.sh`), then `python3 Tests/full_screen_chrome.py`.
+Build first (`./build.sh debug`), then `python3 Tests/full_screen_chrome.py`.
 Nothing goes full screen: the page's own word that it is going, and that it
 is back (Forms.swift, "fullscreen"), is sent from Search's world, and what
 lies where the column is is asked of the window. The column steps aside for

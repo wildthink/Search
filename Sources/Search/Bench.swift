@@ -298,6 +298,51 @@ final class Bench {
         }
 
         switch verb {
+        case "tabs", "open", "go", "close", "wait", "sleep", "pin", "select", "text", "eval", "tap", "click", "type", "submit":
+            tabCommand(verb, request, browser: browser, answer)
+
+        case "towindow", "news", "quit", "windows", "middle", "linkmenu":
+            windowCommand(verb, request, browser: browser, answer)
+
+        case "shot", "probe", "press", "key", "resize", "hit", "field", "switcher", "recording", "sitesearch":
+            probeCommand(verb, request, browser: browser, answer)
+
+        case "bookmark", "dropdown", "import", "import-preview", "import-file", "remove-folder", "import-file-start", "import-file-status", "import-file-cancel":
+            importCommand(verb, request, browser: browser, answer)
+
+        case "menus", "menu", "keyeq", "image-data", "find", "visible":
+            menuCommand(verb, request, browser: browser, answer)
+
+        case "ai", "notifications", "answer", "accounts", "fill":
+            assistantCommand(verb, request, browser: browser, answer)
+
+        case "peek", "pull", "place", "group", "tospace", "window", "pages":
+            layoutCommand(verb, request, browser: browser, answer)
+
+        case "picture", "float", "film", "strip":
+            pictureCommand(verb, request, browser: browser, answer)
+
+        case "update", "consent", "fold", "little", "site", "column", "space", "split", "ui":
+            appCommand(verb, request, browser: browser, answer)
+
+        case "extensions", "ext-add", "ext-folder", "ext-press", "ext-remove", "ext-reload", "ext-page", "ext-popup", "ext-menu", "ext-pin", "ext-shot", "ext-answer", "ext-enable", "capture", "capture-stop":
+            guard #available(macOS 15.4, *) else {
+                answer(["error": "extensions need macOS 15.4"])
+                return
+            }
+            extensionCommand(verb, request, browser: browser, answer)
+
+        default:
+            answer(["error": "unknown command “\(verb)”", "commands": [
+                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "float", "window", "pages", "picture", "place", "group", "tospace", "field", "bookmark", "menu", "keyeq", "fill", "pin", "middle", "windows", "quit", "towindow", "news", "pull", "space", "split", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file", "import-file-start", "import-file-status", "import-file-cancel", "remove-folder", "accounts", "find", "answer", "visible", "ai", "notifications",
+            ]])
+        }
+    }
+
+    /// Tabs and what is in them: opening, going, closing, reading a page and
+    /// acting on it.
+    private func tabCommand(_ verb: String, _ request: [String: Any], browser: Browser, _ answer: @escaping ([String: Any]) -> Void) {
+        switch verb {
         case "tabs":
             // A private tab is nobody's business but yours: a test run has none
             // of yours, so there every tab is listed.
@@ -462,6 +507,15 @@ final class Bench {
                 }
             }
 
+        default:
+            answer(["error": "unknown command “\(verb)”"])
+        }
+    }
+
+    /// Windows, and what a link opens: a window of its own, a tab beside, the
+    /// link's menu.
+    private func windowCommand(_ verb: String, _ request: [String: Any], browser: Browser, _ answer: @escaping ([String: Any]) -> Void) {
+        switch verb {
         case "towindow":
             // A tab to another window, as its menu's Move to Window does: to
             // the Nth, or a new one. Only on a SEARCH_PROBE run.
@@ -613,6 +667,15 @@ final class Bench {
                 ])
             }
 
+        default:
+            answer(["error": "unknown command “\(verb)”"])
+        }
+    }
+
+    /// What is where, and pressing it: pictures, the window's parts, keys and
+    /// clicks as a person sends them, and the overlays they bring up.
+    private func probeCommand(_ verb: String, _ request: [String: Any], browser: Browser, _ answer: @escaping ([String: Any]) -> Void) {
+        switch verb {
         case "shot":
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
             house(tab)
@@ -1037,6 +1100,14 @@ final class Bench {
             default: answer(state())
             }
 
+        default:
+            answer(["error": "unknown command “\(verb)”"])
+        }
+    }
+
+    /// Bookmarks, and what comes in from another browser.
+    private func importCommand(_ verb: String, _ request: [String: Any], browser: Browser, _ answer: @escaping ([String: Any]) -> Void) {
+        switch verb {
         case "bookmark":
             // A bookmark picked from the button's list, through the same
             // call the list makes: how long until WebKit is loading it, and
@@ -1217,6 +1288,14 @@ final class Bench {
             browser.cancelFileImport()
             answer(["cancelling": browser.fileImport?.cancelling ?? false])
 
+        default:
+            answer(["error": "unknown command “\(verb)”"])
+        }
+    }
+
+    /// The menus, their key equivalents, and finding in a page.
+    private func menuCommand(_ verb: String, _ request: [String: Any], browser: Browser, _ answer: @escaping ([String: Any]) -> Void) {
+        switch verb {
         case "menus":
             // Every menu of the menu bar, by title, after SwiftUI has filled
             // it — and whether the AI add-on counts as on. Reads only.
@@ -1351,6 +1430,14 @@ final class Bench {
             // seen is checked on a release candidate instead.
             answer(["error": "visible is switched off: it made a window, and no bench verb makes one for now — check this on a release candidate"])
 
+        default:
+            answer(["error": "unknown command “\(verb)”"])
+        }
+    }
+
+    /// The assistant, a site's notifications, and accounts and passwords.
+    private func assistantCommand(_ verb: String, _ request: [String: Any], browser: Browser, _ answer: @escaping ([String: Any]) -> Void) {
+        switch verb {
         case "ai":
             // The AI add-on's requests against a stand-in on this Mac: "mock"
             // points every provider at it, "key" keeps a made-up key for the
@@ -1534,6 +1621,15 @@ final class Bench {
             }
             step(0)
 
+        default:
+            answer(["error": "unknown command “\(verb)”"])
+        }
+    }
+
+    /// Where tabs and windows are: peeking, pulling, groups, spaces, the window's
+    /// frame and whether pages are shown.
+    private func layoutCommand(_ verb: String, _ request: [String: Any], browser: Browser, _ answer: @escaping ([String: Any]) -> Void) {
+        switch verb {
         case "peek":
             // A link's page in the peek panel over the tab in front, as a
             // shift-click on it would open it (see Peek.swift); "close" puts
@@ -1674,6 +1770,14 @@ final class Bench {
                 answer(["pages": false])
             }
 
+        default:
+            answer(["error": "unknown command “\(verb)”"])
+        }
+    }
+
+    /// Video: picture in picture, a floating player, and film of either.
+    private func pictureCommand(_ verb: String, _ request: [String: Any], browser: Browser, _ answer: @escaping ([String: Any]) -> Void) {
+        switch verb {
         case "picture":
             // The whole window as a picture — the app's own drawing, with each
             // page on screen put in as WebKit pictures it — from a probe
@@ -2187,6 +2291,15 @@ final class Bench {
                 window.contentView = nil
             }
 
+        default:
+            answer(["error": "unknown command “\(verb)”"])
+        }
+    }
+
+    /// The app's own state: updates, consent, the sidebar, little windows, site
+    /// settings, spaces, Split View and its panels.
+    private func appCommand(_ verb: String, _ request: [String: Any], browser: Browser, _ answer: @escaping ([String: Any]) -> Void) {
+        switch verb {
         case "update":
             // The updater, for a test run pointed at its own feed: `check`
             // is the menu's Check for Updates…, `disk` the Download button.
@@ -2424,17 +2537,8 @@ final class Bench {
             if #available(macOS 15.4, *), let on = request["extensions"] as? Bool { Extensions.shared.menuOpen = on }
             answer(["ok": true])
 
-        case "extensions", "ext-add", "ext-folder", "ext-press", "ext-remove", "ext-reload", "ext-page", "ext-popup", "ext-menu", "ext-pin", "ext-shot", "ext-answer", "ext-enable", "capture", "capture-stop":
-            guard #available(macOS 15.4, *) else {
-                answer(["error": "extensions need macOS 15.4"])
-                return
-            }
-            extensionCommand(verb, request, browser: browser, answer)
-
         default:
-            answer(["error": "unknown command “\(verb)”", "commands": [
-                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "float", "window", "pages", "picture", "place", "group", "tospace", "field", "bookmark", "menu", "keyeq", "fill", "pin", "middle", "windows", "quit", "towindow", "news", "pull", "space", "split", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file", "import-file-start", "import-file-status", "import-file-cancel", "remove-folder", "accounts", "find", "answer", "visible", "ai", "notifications",
-            ]])
+            answer(["error": "unknown command “\(verb)”"])
         }
     }
 

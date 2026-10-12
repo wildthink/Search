@@ -5,6 +5,8 @@
 #   ./fresh.sh again    open the test copy as it was left, no wipe
 #
 #   SEARCH_PROBE=NAME ./fresh.sh   the same for a named world, "Search (NAME)"
+#   SEARCH_BUILD=release ./fresh.sh   the release app in build/ rather than
+#                                     build/debug/'s — for anything timed
 #
 # A run with SEARCH_PROBE=1 keeps everything apart from the real one: its own
 # folder under Application Support, its own settings suite, its own WebKit
@@ -36,7 +38,15 @@ if [ "${1:-}" != "again" ]; then
   echo "world \"$WORLD\" wiped"
 fi
 
-[ -d "build/Search.app" ] || ./build.sh release
+# The debug app unless asked otherwise (build.sh: seconds to rebuild, and
+# apart from the release app someone may have open).
+BUILD="${SEARCH_BUILD:-debug}"
+case "$BUILD" in
+  debug) APP="build/debug/Search.app" ;;
+  release) APP="build/Search.app" ;;
+  *) echo "SEARCH_BUILD is debug or release, not “$BUILD”" >&2; exit 1 ;;
+esac
+[ -d "$APP" ] || ./build.sh "$BUILD"
 
 # A world the bench is going to drive opens hidden. A test run that comes to
 # the front trips the probe's own guard, which hides the app and then refuses
@@ -47,4 +57,4 @@ HIDDEN=""
 if [ "$(defaults read "$SUITE" bench 2>/dev/null || true)" = 1 ]; then
   HIDDEN="-g -j"
 fi
-open -n $HIDDEN --env SEARCH_PROBE="$WORLD" "build/Search.app"
+open -n $HIDDEN --env SEARCH_PROBE="$WORLD" "$APP"

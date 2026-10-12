@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The floating video's isolation (Float.swift, Isolate.on) on local pages.
 
-Build first (`./build.sh`), then `python3 Tests/float_video.py`. Each page
+Build first (`./build.sh debug`), then `python3 Tests/float_video.py`. Each page
 holds a playing video under an ancestor that makes a box of its own for
 fixed elements (a transform, a filter, containment…), is drawn only when on
 screen, or is faded out. The isolation script is run on an ordinary tab of

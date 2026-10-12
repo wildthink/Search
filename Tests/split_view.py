@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Split View, checked through Search's own model in a hidden probe.
 
-Build first (`./build.sh` or `./build.sh debug`), then run
+Build first (`./build.sh debug`, or `./build.sh` with SEARCH_BUILD=release), then run
 `python3 Tests/split_view.py`. The app is started hidden in a world of its
 own (SEARCH_PROBE=split-tests-<checkout>, see use()), driven through
 ./bench's socket, and quit;
@@ -26,7 +26,9 @@ from pathlib import Path
 
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 ROOT = Path(__file__).resolve().parents[1]
-APP = str(ROOT / "build" / "Search.app")
+# The debug app (./build.sh debug), apart from the release app in build/ that
+# may be open; SEARCH_BUILD=release for the release one.
+APP = str(ROOT / "build" / ("" if os.environ.get("SEARCH_BUILD") == "release" else "debug") / "Search.app")
 HOME = os.path.expanduser("~")
 def use(name):
     """This checkout's own world for a suite: the name, then a tag made from

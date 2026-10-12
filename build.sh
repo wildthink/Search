@@ -4,6 +4,12 @@
 # fetches.
 #
 #   ./build.sh                 debug-free release build, ad-hoc signed: runs here
+#   ./build.sh debug           the same app unoptimised, in build/debug/, for
+#                                the bench and Tests/*.py: a change rebuilds in
+#                                seconds instead of a minute and a half (one
+#                                whole-module -Osize pass), and the release app
+#                                in build/ can stay open while tests run.
+#                                Measure speed on a release build, not this one.
 #   ./build.sh release dmg     + build/Search.dmg, build/Search.zip and
 #                                build/appcast.json, signed with Developer ID
 #                                if there is one in the keychain
@@ -52,6 +58,8 @@ case "$ARCH" in
   x86_64) OUT="build/intel"; SUBFOLDER="/intel" ;;
   *) echo "SEARCH_ARCH is arm64 or x86_64, not “$ARCH”" >&2; exit 1 ;;
 esac
+# A debug build is its own app beside the release one, never in its place.
+[ "$CONFIG" = "debug" ] && OUT="$OUT/debug"
 APP="$OUT/Search.app"
 NAME="Search"
 VERSION="$(tr -d '[:space:]' < VERSION)"

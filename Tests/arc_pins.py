@@ -1,6 +1,6 @@
 """A favourite already pinned doesn't come in a second time (#482).
 
-Build first (`./build.sh`), then `python3 Tests/arc_pins.py`. A made-up Arc
+Build first (`./build.sh debug`), then `python3 Tests/arc_pins.py`. A made-up Arc
 profile is brought in twice, with a pin sent wandering in between, the way a
 site does when it answers somewhere else: Gmail pinned at mail.google.com and
 found at mail.google.com/mail/u/0/. The second import must add nothing.
