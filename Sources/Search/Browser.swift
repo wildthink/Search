@@ -1,6 +1,7 @@
 import SwiftUI
 import WebKit
 import Combine
+import UniformTypeIdentifiers
 
 // Everything the window knows: which tabs exist, which one is showing, and
 // whether the address field is up. Small enough to read in one sitting, which
@@ -2268,7 +2269,10 @@ final class Browser: NSObject, ObservableObject {
     private func kept(_ tab: Tab) -> Bool {
         // A tab holding an extension's sign-in answer (Tab.hold) carries its
         // code in the address: that is never written down.
-        !tab.shy && !tab.bench && tab.held == nil && (tab.pending ?? tab.address)?.scheme?.hasPrefix("http") == true
+        guard !tab.shy, !tab.bench, tab.held == nil, let url = tab.pending ?? tab.address else { return false }
+        // A page on the web, or a file Search shows itself (TabContent.swift):
+        // the document comes back with the tab. A page on this Mac doesn't.
+        return url.scheme?.hasPrefix("http") == true || tab.document != nil || Documents.handles(url)
     }
 
     /// Another space's row. Its groups are the ones in its own file, the
@@ -3548,6 +3552,37 @@ final class Browser: NSObject, ObservableObject {
         active?.document?.save { _ in }
     }
 
+    /// ⌘O: files on this Mac, each in a tab — a document Search shows
+    /// itself, or a page WebKit does (see Documents.handles).
+    func openFile() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = Browser.openable
+        guard panel.runModal() == .OK else { return }
+        open(files: panel.urls)
+    }
+
+    /// What ⌘O offers: pages, and the files Search reads itself. A SQLite
+    /// file named .db is found by name: the system has no type for it.
+    static let openable: [UTType] = [
+        .html, .pdf, .image, .svg, .plainText, .json, .spreadsheet,
+        UTType("net.daringfireball.markdown"), UTType("org.sqlite.sqlite3"), UTType(filenameExtension: "db"),
+    ].compactMap { $0 }
+
+    /// Each file in a tab of its own, the last one in front; one already
+    /// open as a document is brought up instead (see open).
+    func open(files: [URL]) {
+        for (n, file) in files.enumerated() {
+            _ = open(file, foreground: n == files.count - 1)
+        }
+    }
+
+    /// File › Open Recent: the files last opened as documents, newest first.
+    var recentFiles: [URL] {
+        NSDocumentController.shared.recentDocumentURLs
+    }
+
     /// The first tab, in any window, holding a document with changes.
     static var unsaved: (browser: Browser, tab: Tab)? {
         for browser in Browsers.all {
@@ -3874,6 +3909,9 @@ final class Browser: NSObject, ObservableObject {
             guard let self, let held = Documents.holder(of: url, except: tab) else { return false }
             bringUp(held.tab, in: held.browser)
             return true
+        }
+        tab.onLeaveEdited = { [weak self] tab, url in
+            self?.mayDiscard(tab) { tab.go(to: url) }
         }
 
         // The caret in a sign-in box: the accounts kept for this site hang
@@ -4320,6 +4358,23 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
             return
         }
 
+        // A page leading to a file Search shows itself — a link in a page on
+        // this Mac, a file dropped on the page — opens it in a tab of its
+        // own, and the page stays. WebKit has already refused a website one
+        // of these (a page on the web can't reach the disk), so only what it
+        // lets through is seen here. A view with no page yet is left to load
+        // what it was given: that is a document that wouldn't open, falling
+        // back to WebKit, and sent on again it would only fall back again.
+        if scheme == "file", action.targetFrame?.isMainFrame ?? true,
+           ![.backForward, .reload].contains(action.navigationType),
+           let here = webView.url, here != url, Documents.handles(url),
+           let from = tab(for: webView) {
+            decisionHandler(.cancel)
+            let behind = action.modifierFlags.contains(.command) && !action.modifierFlags.contains(.shift)
+            DispatchQueue.main.async { [weak self] in _ = self?.open(url, foreground: !behind, from: from) }
+            return
+        }
+
         // ⌘-click opens beside this tab and leaves you where you are; ⌘⇧-click
         // takes you with it.
         //
@@ -4475,6 +4530,17 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         for action: WKNavigationAction,
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
+        // A file on this Mac: only a page on this Mac may ask for one —
+        // WebKit refuses a website the file, and the tab it would get stood
+        // empty under the file's name. A file Search shows itself opens as
+        // its links do (see decide).
+        if let url = action.request.url, url.isFileURL {
+            guard (action.sourceFrame as WKFrameInfo?)?.securityOrigin.protocol == "file" else { return nil }
+            if Documents.handles(url) {
+                open(url, foreground: true, from: tab(for: webView))
+                return nil
+            }
+        }
         let from = tab(for: webView)?.id ?? activeID
         // WebKit's copy of the opener's configuration still holds the
         // opener's user content controller — its scripts and its message

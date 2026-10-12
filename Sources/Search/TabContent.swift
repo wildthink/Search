@@ -103,9 +103,14 @@ enum Documents {
         guard let type = type(of: url) else { return false }
         if PreviewDocument.handles(type) { return true }
         if type.conforms(to: .html) || type.conforms(to: .svg) || type.conforms(to: .xml) { return false }
-        return type.conforms(to: .json)
-            || type.conforms(to: .markdown)
-            || type.conforms(to: .plainText)
+        guard type.conforms(to: .json) || type.conforms(to: .markdown) || type.conforms(to: .plainText) else { return false }
+        // Text past what memory should hold at once stays WebKit's, as before.
+        return (size(of: url) ?? 0) <= TextDocument.ceiling
+    }
+
+    /// The file's size in bytes, when it has one to tell.
+    static func size(of url: URL) -> Int? {
+        (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
     }
 
     static func open(_ url: URL) throws -> TabContent {
@@ -168,6 +173,14 @@ final class TextDocument: NSDocument, TabContent, NSTextViewDelegate {
     private var reader: NSTextView { reading.documentView as! NSTextView }
     private let tree = JSONTree()
     private(set) var isReading = false
+    /// Too big to edit, or to render or draw as a tree, without the window
+    /// stopping while it does: shown as its source, to read.
+    private(set) var isLarge = false
+
+    /// Past this a text file opens read-only (`isLarge`), past `ceiling` not
+    /// at all: a log of a few hundred megabytes is WebKit's, as it was.
+    static let largest = 20 << 20
+    static let ceiling = 256 << 20
 
     /// What reading it means, by the kind of file.
     private enum Kind { case markdown, json, text }
@@ -243,7 +256,7 @@ final class TextDocument: NSDocument, TabContent, NSTextViewDelegate {
     // Its types are whatever the file was, not ones the app declares.
     override class func isNativeType(_ type: String) -> Bool { true }
     override func writableTypes(for saveOperation: NSDocument.SaveOperationType) -> [String] {
-        fileType.map { [$0] } ?? []
+        isLarge ? [] : fileType.map { [$0] } ?? []
     }
     override func fileNameExtension(forType typeName: String, saveOperation: NSDocument.SaveOperationType) -> String? {
         fileURL?.pathExtension
@@ -253,6 +266,20 @@ final class TextDocument: NSDocument, TabContent, NSTextViewDelegate {
     override var windowForSheet: NSWindow? { page.window ?? NSApp.keyWindow }
 
     override func read(from data: Data, ofType typeName: String) throws {
+        let type = UTType(typeName)
+        isLarge = data.count > TextDocument.largest
+        kind = isLarge ? .text
+            : type?.conforms(to: .json) == true ? .json
+            : type?.conforms(to: .markdown) == true ? .markdown
+            : .text
+        // The view made ready before the text goes in: set afterwards, each
+        // of these lays the whole file out again.
+        editor.isEditable = !isLarge
+        // Laid out as it is scrolled to, not all of it before it shows.
+        editor.layoutManager?.allowsNonContiguousLayout = isLarge
+        editor.font = type?.conforms(to: .json) == true || isLarge
+            ? .monospacedSystemFont(ofSize: 12, weight: .regular)
+            : .systemFont(ofSize: 14)
         // Not UTF-8: Latin-1 reads anything, which beats refusing the file,
         // and it is written back as Latin-1.
         if let text = String(data: data, encoding: .utf8) {
@@ -262,13 +289,6 @@ final class TextDocument: NSDocument, TabContent, NSTextViewDelegate {
             encoding = .isoLatin1
             editor.string = String(data: data, encoding: .isoLatin1) ?? ""
         }
-        let type = UTType(typeName)
-        kind = type?.conforms(to: .json) == true ? .json
-            : type?.conforms(to: .markdown) == true ? .markdown
-            : .text
-        editor.font = kind == .json
-            ? .monospacedSystemFont(ofSize: 12, weight: .regular)
-            : .systemFont(ofSize: 14)
         undoManager?.removeAllActions()
         // Read again — another app changed it, or Revert — and shown again.
         if isReading { render() }

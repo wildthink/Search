@@ -150,6 +150,7 @@ struct Command: Identifiable {
         Command("file.newPrivateTab", "New Private Tab", .file, KeyCombo("n", shift: true)) { $0.newShyTab() },
         Command("file.reopen", "Reopen Closed Tab", .file, KeyCombo("t", shift: true)) { $0.reopen() },
         Command("file.openAddress", "Open Address…", .file, KeyCombo("l")) { $0.edit() },
+        Command("file.openFile", "Open File…", .file, KeyCombo("o")) { $0.openFile() },
         Command("file.closeTab", "Close Tab", .file, KeyCombo("w")) { $0.closeFront() },
         Command("file.save", "Save", .file, KeyCombo("s")) { $0.saveDocument() },
         Command("file.import", "Bring Things Over…", .file, nil) { $0.bringingIn = "" },

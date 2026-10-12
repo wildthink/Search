@@ -58,6 +58,17 @@ struct SearchApp: App {
                 Divider()
                 Button("Open Address…") { browser.edit() }
                     .shortcut("file.openAddress")
+                Button("Open File…") { browser.openFile() }
+                    .shortcut("file.openFile")
+                // Files opened as documents, as any Mac app keeps them.
+                Menu("Open Recent") {
+                    ForEach(browser.recentFiles, id: \.self) { file in
+                        Button(file.lastPathComponent) { _ = browser.open(file, foreground: true) }
+                    }
+                    Divider()
+                    Button("Clear Menu") { NSDocumentController.shared.clearRecentDocuments(nil) }
+                        .disabled(browser.recentFiles.isEmpty)
+                }
                 Divider()
                 // Another browser's bookmarks, history, passwords and the
                 // rest, as Safari's File › Import From: the one sheet every
@@ -1371,6 +1382,8 @@ struct ContentView: View {
             }
         case "p" where !shifted:
             browser.printPage()
+        case "o" where !shifted:
+            browser.openFile()
         case "f" where !shifted:
             browser.openFind()
         case "g":

@@ -198,6 +198,55 @@ final class DocumentTests: XCTestCase {
         XCTAssertEqual(opened.map { $0.isFileURL ? $0.lastPathComponent : $0.absoluteString }, ["https://example.com", "other.md"])
     }
 
+    // MARK: - large files
+
+    func testATextFilePastTheLimitOpensToReadOnly() throws {
+        let url = folder.appendingPathComponent("big.md")
+        let line = Data("# heading and a line of text to fill the file\n".utf8)
+        var data = Data()
+        while data.count <= TextDocument.largest { data.append(line) }
+        try data.write(to: url)
+
+        let document = try XCTUnwrap(try open(url) as? TextDocument)
+        XCTAssertTrue(document.isLarge)
+        XCTAssertFalse(document.isReading, "not rendered: its source, to read")
+        XCTAssertFalse(document.setReading(true))
+        let editor = try XCTUnwrap(document.focus as? NSTextView)
+        XCTAssertFalse(editor.isEditable)
+        XCTAssertEqual(document.writableTypes(for: .saveOperation), [])
+        XCTAssertEqual(document.text?.utf8.count, data.count)
+    }
+
+    func testATextFilePastTheCeilingStaysAPage() throws {
+        // Sparse: as big as it says, without the disk writing it.
+        let url = folder.appendingPathComponent("huge.log.txt")
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.truncate(atOffset: UInt64(TextDocument.ceiling + 1))
+        try handle.close()
+        XCTAssertFalse(Documents.handles(url))
+        let small = try file("small.txt", "small\n")
+        XCTAssertTrue(Documents.handles(small))
+    }
+
+    // MARK: - a path typed in the address bar
+
+    func testAPathToAFileTypedIsThatFile() throws {
+        let url = try file("my notes.md", "# Notes\n")
+        XCTAssertEqual(Address.url(from: url.path)?.standardizedFileURL, url.standardizedFileURL, "spaces and all")
+        XCTAssertEqual(Address.url(from: "  \(url.path)\n")?.isFileURL, true)
+        XCTAssertNil(Address.url(from: folder.path), "a folder is not opened")
+        XCTAssertNil(Address.url(from: folder.appendingPathComponent("missing.md").path))
+        XCTAssertNil(Address.url(from: "/"))
+
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let inHome = home.appendingPathComponent(".search-address-test-\(UUID().uuidString).txt")
+        try "x".write(to: inHome, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: inHome) }
+        XCTAssertEqual(Address.url(from: "~/" + inHome.lastPathComponent)?.standardizedFileURL, inHome.standardizedFileURL)
+        XCTAssertEqual(Address.url(from: "example.com")?.host(), "example.com", "addresses as before")
+    }
+
     // MARK: - spreadsheets, shown by Quick Look
 
     func testSpreadsheetsAreShownByQuickLookAndNeverWritten() throws {

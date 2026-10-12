@@ -513,6 +513,9 @@ final class Tab: ObservableObject, Identifiable {
     /// A file another tab already holds as a document: that tab brought up
     /// instead (see Documents.holder). Whether it was.
     var onDocument: ((Tab, URL) -> Bool)?
+    /// Sent somewhere else with a document that has changes: asked about
+    /// first, then sent on (see go(to:)).
+    var onLeaveEdited: ((Tab, URL) -> Void)?
     /// The extension whose store page has its own "Add to Search" button in
     /// place — so the bar at the bottom of the window doesn't offer it twice.
     @Published var storePlaced: String?
@@ -984,9 +987,12 @@ final class Tab: ObservableObject, Identifiable {
         // extension's page opened with window.open is built from that
         // extension's configuration too. A tab with no page yet was just
         // built for where it is going, so it goes there.
-        // SPIKE: a document with changes isn't navigated away from. The
-        // real thing asks, as closing does (Browser.close).
-        if document?.dirty == true { NSSound.beep(); return }
+        // A document with changes is left only once asked, as closing it
+        // is (Browser.mayDiscard): saved or let go, it comes back here.
+        if document?.dirty == true {
+            if let onLeaveEdited { onLeaveEdited(self, url) } else { NSSound.beep() }
+            return
+        }
         if Documents.handles(url), let onDocument, onDocument(self, url) { return }
         if let onCross, let here = built?.url ?? address,
            Browser.extensionHost(of: here) != Browser.extensionHost(of: url) {
@@ -1014,7 +1020,17 @@ final class Tab: ObservableObject, Identifiable {
         adoptIcon()
         if adopt(document: url) { return }
         document = nil
+        if missing(url) { return }
         web.open(url)
+    }
+
+    /// A file that isn't there — moved, renamed or deleted since the tab
+    /// last showed it — said so, rather than a page left empty. Whether it was.
+    private func missing(_ url: URL) -> Bool {
+        guard url.isFileURL, !FileManager.default.fileExists(atPath: url.path) else { return false }
+        title = url.lastPathComponent
+        failure = "“\(url.lastPathComponent)” isn’t there any more. It may have been moved, renamed or deleted."
+        return true
     }
 
     /// The file at `url` opened as a document, if it is one Search shows
@@ -1029,13 +1045,18 @@ final class Tab: ObservableObject, Identifiable {
             onOpenLink?(self, link)
         }
         reader = opened.isReading
+        // Too big to edit, and saying so where the tab's name is.
+        let shown = (opened as? TextDocument)?.isLarge == true ? "\(name) — Read Only" : name
         opened.onDirty = { [weak self] dirty in
-            self?.title = dirty ? "\(name) — Edited" : name
+            self?.title = dirty ? "\(name) — Edited" : shown
         }
         document = opened
         address = url
         committed = url
-        title = name
+        title = shown
+        // File › Open Recent, and the Dock icon's list, as any Mac app's.
+        // Not from a test world: the list is the app's, theirs included.
+        if !shy, !bench, !Store.testing { NSDocumentController.shared.noteNewRecentDocumentURL(url) }
         // The Finder's own picture of the file, where a site has its icon.
         icon = NSWorkspace.shared.icon(forFile: url.path)
         return true
@@ -1325,6 +1346,7 @@ final class Tab: ObservableObject, Identifiable {
         }
         picture = nil
         if adopt(document: url) { return true }
+        if missing(url) { return true }
         loadAndVerify(url, state: state)
         return true
     }
@@ -1370,8 +1392,13 @@ final class Tab: ObservableObject, Identifiable {
             return
         }
         reader = false
-        // A file is read again with the folder it may read (see open).
-        if let address, hollow || address.isFileURL {
+        // A file is opened again as it was first: a document if it is one,
+        // a page read with the folder it may read (see open), or said to be
+        // gone — and back, once it is.
+        if let address, address.isFileURL {
+            failure = nil
+            go(to: address)
+        } else if let address, hollow {
             web.open(address)
         } else if fromOrigin {
             web.reloadFromOrigin()

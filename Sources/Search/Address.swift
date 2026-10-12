@@ -10,8 +10,20 @@ enum Address {
     /// here rather than opening a blank tab.
     private static let ours: Set<String> = ["http", "https", "file", "about", "data"]
 
+    /// The file at `path`, `~` for the home folder, when there is one.
+    private static func file(at path: String) -> URL? {
+        let full = (path as NSString).expandingTildeInPath
+        var folder: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: full, isDirectory: &folder), !folder.boolValue else { return nil }
+        return URL(fileURLWithPath: full)
+    }
+
     static func url(from typed: String) -> URL? {
         let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A file on this Mac, by its path as the Terminal or the Finder's
+        // Copy as Pathname writes it — spaces and all. Only one that is
+        // there, and not a folder: "/" or "~" alone means nothing here.
+        if text.hasPrefix("/") || text.hasPrefix("~/"), let file = file(at: text) { return file }
         guard !text.isEmpty, !text.contains(" ") else { return nil }
 
         // Written with a scheme, it is taken at its word.
