@@ -3556,27 +3556,66 @@ final class Browser: NSObject, ObservableObject {
         return nil
     }
 
+    /// What to do with a document's changes as it goes.
+    enum Unsaved: String { case save, discard, cancel }
+
+    /// In a test run: every unsaved-changes question answered this way
+    /// without asking, and the files it was asked about (see the bench's
+    /// doc-answer). For the whole app, since quitting asks in every window.
+    static var unsavedAnswerForTests: Unsaved?
+    static var unsavedAsked: [String] = []
+
     /// A document with changes, asked about before it goes: Save, Don't
     /// Save, or Cancel. `go` runs once it may go — after the save, which
     /// takes a moment — and never on Cancel or a save that failed.
+    ///
+    /// A sheet on the tab's own window, brought up in front so the question
+    /// is about what you can see, as every question Search asks is (Ask):
+    /// an alert run modally would stop every page and download until it
+    /// was answered.
     func mayDiscard(_ tab: Tab, then go: @escaping () -> Void) {
         guard let document = tab.document, document.dirty else { return go() }
+        let name = document.url.lastPathComponent
+        let decide = { (answer: Unsaved) in
+            switch answer {
+            case .save:
+                document.save { saved in if saved { go() } }
+            case .discard:
+                // Its changes let go of, so nothing asks about them again.
+                document.updateChangeCount(.changeCleared)
+                go()
+            case .cancel:
+                break
+            }
+        }
+        if Store.testing, let answer = Browser.unsavedAnswerForTests {
+            Browser.unsavedAsked.append(name)
+            return decide(answer)
+        }
+        select(tab)
+        Browsers.show(self)
+        // One question at a time: ⌘W again while it is up asks nothing more.
+        guard window?.attachedSheet == nil else { return NSSound.beep() }
+
         let alert = NSAlert()
-        alert.messageText = "Save the changes to “\(document.url.lastPathComponent)”?"
+        alert.messageText = "Do you want to save the changes you made to “\(name)”?"
         alert.informativeText = "Your changes will be lost if you don’t save them."
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Don’t Save")
-        switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            document.save { saved in if saved { go() } }
-        case .alertThirdButtonReturn:
-            // Its changes let go of, so nothing asks about them again.
-            document.updateChangeCount(.changeCleared)
-            go()
-        default:
-            break
+        let discard = alert.addButton(withTitle: "Don’t Save")
+        discard.hasDestructiveAction = true
+        // ⌘D, as in every Mac app that asks this.
+        discard.keyEquivalent = "d"
+        discard.keyEquivalentModifierMask = .command
+        let answer = { (response: NSApplication.ModalResponse) -> Unsaved in
+            switch response {
+            case .alertFirstButtonReturn: .save
+            case .alertThirdButtonReturn: .discard
+            default: .cancel
+            }
         }
+        guard let window else { return decide(answer(alert.runModal())) }
+        alert.beginSheetModal(for: window) { decide(answer($0)) }
     }
 
     /// The print job for a page, or for one frame of it when WebKit names

@@ -39,6 +39,12 @@ enum AIPage {
     /// The page on screen in `tab`, read. Nil when there is nothing to read.
     @MainActor
     static func read(_ tab: Tab) async -> Read? {
+        // A document is read as it stands in its view, changes not yet
+        // saved included: what is on screen, as with a page.
+        if let document = tab.document {
+            guard let text = document.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return shaped(title: document.url.lastPathComponent, url: document.url, text: text, links: [])
+        }
         guard let web = tab.built else { return nil }
         let value: Any? = await withCheckedContinuation { done in
             web.evaluateJavaScript(script, in: nil, in: Web.world) { result in done.resume(returning: try? result.get()) }

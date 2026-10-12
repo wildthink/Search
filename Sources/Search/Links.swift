@@ -28,7 +28,6 @@ final class Links: NSObject, NSApplicationDelegate {
         // Cancel and nothing quits.
         let asking = MainActor.assumeIsolated {
             guard let (browser, tab) = Browser.unsaved else { return false }
-            browser.select(tab)
             browser.mayDiscard(tab) { NSApp.terminate(nil) }
             return true
         }

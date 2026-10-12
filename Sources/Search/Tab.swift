@@ -1023,6 +1023,8 @@ final class Tab: ObservableObject, Identifiable {
         address = url
         committed = url
         title = name
+        // The Finder's own picture of the file, where a site has its icon.
+        icon = NSWorkspace.shared.icon(forFile: url.path)
         return true
     }
 

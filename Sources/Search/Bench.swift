@@ -298,7 +298,7 @@ final class Bench {
         }
 
         switch verb {
-        case "tabs", "open", "go", "close", "wait", "sleep", "pin", "select", "text", "eval", "tap", "click", "type", "submit":
+        case "tabs", "open", "go", "doc-answer", "close", "wait", "sleep", "pin", "select", "text", "eval", "tap", "click", "type", "submit":
             tabCommand(verb, request, browser: browser, answer)
 
         case "towindow", "news", "quit", "windows", "middle", "linkmenu":
@@ -369,6 +369,13 @@ final class Bench {
             tab.go(to: url)
             answer(describe(tab))
 
+        case "doc-answer":
+            // In a test run: answer every "save the changes?" question
+            // without asking, or go back to asking — with the files asked
+            // about so far.
+            guard Store.testing else { answer(["error": "only in a test run"]); return }
+            Browser.unsavedAnswerForTests = (request["answer"] as? String).flatMap(Browser.Unsaved.init(rawValue:))
+            answer(["answer": request["answer"] as? String ?? "ask", "asked": Browser.unsavedAsked])
         case "close":
             if (request["id"] as? String) == "all" {
                 let mine = browser.tabs.filter { $0.bench }

@@ -182,6 +182,20 @@ cat > "$APP/Contents/Info.plist" <<PLIST
       <key>LSItemContentTypes</key>
       <array><string>public.xhtml</string></array>
     </dict>
+    <!-- Text files Search opens in a tab of its own and can edit (see
+         TabContent.swift). Alternate: listed under Open With, never made
+         the file's default app by being installed. -->
+    <dict>
+      <key>CFBundleTypeName</key><string>Text document</string>
+      <key>CFBundleTypeRole</key><string>Editor</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>net.daringfireball.markdown</string>
+        <string>public.json</string>
+        <string>public.plain-text</string>
+      </array>
+    </dict>
   </array>
   <!-- A browser goes wherever it is pointed, including at http sites and at
        whatever is running on localhost. -->
