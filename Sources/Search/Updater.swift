@@ -15,7 +15,7 @@ import Security
 //
 // What the updater leaves alone, on purpose: everything in
 // ~/Library/Application Support/Search, the defaults under
-// com.wildthink.search, and the keychain. The session, the pins, the
+// com.officecommun.search, and the keychain. The session, the pins, the
 // history, the passwords — none of it is read, moved or rewritten here. Only
 // the bundle changes hands, and it keeps its bundle id and its signing
 // identity, so the keychain items the old build made open for the new one.
@@ -167,6 +167,8 @@ final class Updater: ObservableObject {
         default: break
         }
         guard !checking else { return }
+        // Surfboard: said, rather than "up to date" from a feed never read.
+        guard Brand.feed != nil || Updater.overridden else { say?("This build of \(Brand.name) doesn't update itself"); return }
         say?("Checking for updates…")
         check { [weak self] found in
             guard let self else { return }
@@ -179,6 +181,8 @@ final class Updater: ObservableObject {
     /// names, or nil when this is the latest; what becomes of it after that
     /// is said through the line handed to `checkIfDue`.
     func check(then done: @escaping (Release?) -> Void) {
+        // Surfboard: no feed of the brand's own yet, so nothing is asked for.
+        guard Brand.feed != nil || Updater.overridden else { done(nil); return }
         guard !checking else { return }
         checking = true
         Task { [weak self] in

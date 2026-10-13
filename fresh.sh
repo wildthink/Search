@@ -34,7 +34,8 @@ if [ "${1:-}" != "again" ]; then
   rm -rf "$HOME/Library/Application Support/Search ($WORLD)"
   defaults delete "$SUITE" 2>/dev/null || true
   # Store.probeStore(1), the fixed identifier of the world's website data.
-  rm -rf "$HOME/Library/WebKit/com.wildthink.search/WebsiteDataStore/$STORE"
+  # Surfboard: WebKit keeps its stores under the app's bundle id (brand/brand.sh).
+  rm -rf "$HOME/Library/WebKit/com.wildthink.surfboard/WebsiteDataStore/$STORE"
   echo "world \"$WORLD\" wiped"
 fi
 

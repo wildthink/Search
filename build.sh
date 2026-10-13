@@ -62,6 +62,15 @@ esac
 [ "$CONFIG" = "debug" ] && OUT="$OUT/debug"
 APP="$OUT/Search.app"
 NAME="Search"
+# Surfboard: what the app is called and the identity it runs under. Upstream's
+# Search by default; brand/brand.sh, when it is there, makes it WildThink's
+# Surfboard (see FORK.md).
+BRAND_NAME="$NAME"
+BRAND_ID="com.officecommun.search"
+BRAND_COPYRIGHT="© Office Commun · Search"
+BRAND_DOCUMENT_TYPES=""
+BRAND_EXPORTED_TYPES=""
+[ -f brand/brand.sh ] && . brand/brand.sh
 VERSION="$(tr -d '[:space:]' < VERSION)"
 # A build number that only ever goes up, so the updater can tell newer from
 # older without parsing version strings.
@@ -147,10 +156,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>$NAME</string>
-  <key>CFBundleDisplayName</key><string>$NAME</string>
+  <key>CFBundleName</key><string>$BRAND_NAME</string>
+  <key>CFBundleDisplayName</key><string>$BRAND_NAME</string>
   <key>CFBundleExecutable</key><string>$NAME</string>
-  <key>CFBundleIdentifier</key><string>com.wildthink.search</string>
+  <key>CFBundleIdentifier</key><string>$BRAND_ID</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$BUILD</string>
@@ -158,7 +167,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   $ICONNAME
   <key>LSMinimumSystemVersion</key><string>$MINIMUM</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
-  <key>NSHumanReadableCopyright</key><string>© Office Commun · Search</string>
+  <key>NSHumanReadableCopyright</key><string>$BRAND_COPYRIGHT</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSAppleScriptEnabled</key><true/>
   <key>OSAScriptingDefinition</key><string>Search.sdef</string>
@@ -262,6 +271,15 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+# Surfboard: the document types the brand adds, after upstream's own.
+if [ -n "$BRAND_DOCUMENT_TYPES" ]; then
+  /usr/libexec/PlistBuddy -c "Merge $BRAND_DOCUMENT_TYPES :CFBundleDocumentTypes" "$APP/Contents/Info.plist" >/dev/null
+fi
+if [ -n "$BRAND_EXPORTED_TYPES" ]; then
+  /usr/libexec/PlistBuddy -c "Add :UTExportedTypeDeclarations array" "$APP/Contents/Info.plist" 2>/dev/null || true
+  /usr/libexec/PlistBuddy -c "Merge $BRAND_EXPORTED_TYPES :UTExportedTypeDeclarations" "$APP/Contents/Info.plist" >/dev/null
+fi
+plutil -lint -s "$APP/Contents/Info.plist"
 
 # Signing. A Developer ID certificate, when there is one, with the hardened
 # runtime Gatekeeper insists on for anything notarised; otherwise ad-hoc,

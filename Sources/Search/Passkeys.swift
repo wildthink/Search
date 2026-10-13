@@ -37,7 +37,8 @@ import WebKit
 final class Passkeys: NSObject {
     static let shared = Passkeys()
 
-    private static let log = Logger(subsystem: "com.wildthink.search", category: "Passkeys")
+    // Surfboard: logged under the brand's identifier (Brand.swift).
+    private static let log = Logger(subsystem: Brand.identifier, category: "Passkeys")
 
     // MARK: - the Mac's permission
 

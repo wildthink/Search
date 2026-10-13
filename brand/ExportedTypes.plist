@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+  <!-- The same declaration the Surfboard app made, so catalogs it wrote
+       are the same kind of file here. -->
+  <dict>
+    <key>UTTypeIdentifier</key><string>com.wildthink.surfboard</string>
+    <key>UTTypeDescription</key><string>Surfboard Catalog</string>
+    <key>UTTypeConformsTo</key>
+    <array><string>com.apple.package</string></array>
+    <key>UTTypeTagSpecification</key>
+    <dict>
+      <key>public.filename-extension</key>
+      <array><string>surfboard</string></array>
+    </dict>
+  </dict>
+</array>
+</plist>

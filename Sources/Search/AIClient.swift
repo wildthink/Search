@@ -44,7 +44,8 @@ enum AIError: LocalizedError, Equatable {
 final class AIClient: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     static let shared = AIClient()
 
-    private static let log = Logger(subsystem: "com.wildthink.search", category: "AI")
+    // Surfboard: logged under the brand's identifier (Brand.swift).
+    private static let log = Logger(subsystem: Brand.identifier, category: "AI")
 
     private lazy var session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
