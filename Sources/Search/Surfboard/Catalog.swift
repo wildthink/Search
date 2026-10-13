@@ -552,11 +552,7 @@ enum Frontmatter {
             var escaping = false
             for ch in raw[raw.index(after: raw.startIndex)..<close] {
                 if escaping {
-                    switch ch {
-                    case "n": out.append("\n")
-                    case "t": out.append("\t")
-                    default: out.append(ch)
-                    }
+                    out.append(Self.escapes[ch] ?? ch)
                     escaping = false
                 } else if ch == "\\" {
                     escaping = true
@@ -573,6 +569,12 @@ enum Frontmatter {
         if let hash = raw.range(of: " #") { return raw[..<hash.lowerBound].trimmingCharacters(in: .whitespaces) }
         return raw
     }
+
+    /// YAML's one-letter escapes; any other escaped character stands for itself.
+    private static let escapes: [Character: Character] = [
+        "0": "\0", "a": "\u{7}", "b": "\u{8}", "t": "\t", "n": "\n", "v": "\u{B}", "f": "\u{C}",
+        "r": "\r", "e": "\u{1B}", "N": "\u{85}", "_": "\u{A0}", "L": "\u{2028}", "P": "\u{2029}",
+    ]
 
     /// The closing double quote, skipping escaped ones.
     private static func closingQuote(_ raw: String) -> String.Index? {
@@ -595,10 +597,11 @@ enum Frontmatter {
             var items: [String] = []
             var current = ""
             var quote: Character?
+            var escaping = false
             for ch in raw.dropFirst().dropLast() {
                 if let q = quote {
                     current.append(ch)
-                    if ch == q { quote = nil }
+                    if escaping { escaping = false } else if ch == "\\" && q == "\"" { escaping = true } else if ch == q { quote = nil }
                 } else if ch == "\"" || ch == "'" {
                     quote = ch
                     current.append(ch)
@@ -631,20 +634,46 @@ enum Frontmatter {
         return nil
     }
 
-    /// A value written so YAML reads it back as the same string: quoted
-    /// where it would otherwise mean something else. The same rule OKF's
-    /// own writer follows.
+    /// A value written so YAML reads it back as the same string: plain when
+    /// YAML reads the plain text back unchanged, double-quoted otherwise. The
+    /// same rule OKF's own writer follows.
     static func scalar(_ s: String) -> String {
         let special = CharacterSet(charactersIn: ":#{}[]|>&*!,?\"'\\").union(.newlines)
+        let scalars = s.unicodeScalars
         let quoted = s.isEmpty
-            || s.unicodeScalars.contains(where: { special.contains($0) })
-            || s.hasPrefix(" ") || s.hasSuffix(" ")
-            || ["true", "false", "null", "~"].contains(s.lowercased())
+            || scalars.contains(where: { special.contains($0) || !plainSafe($0) })
+            // Indicators can't start a plain scalar; whitespace at either end is trimmed.
+            || scalars.first.map { "-%@`".unicodeScalars.contains($0) || $0.properties.isWhitespace } ?? false
+            || scalars.last?.properties.isWhitespace ?? false
+            || s.hasPrefix("...") || s.hasPrefix("0o")
+            || ["true", "false", "null", "~", ".inf", "+.inf", "-.inf", ".nan"].contains(s.lowercased())
             || Double(s) != nil || Int(s) != nil
         guard quoted else { return s }
-        return "\"" + s.replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n") + "\""
+        var out = "\""
+        for scalar in scalars {
+            switch scalar {
+            case "\\": out += "\\\\"
+            case "\"": out += "\\\""
+            case "\n": out += "\\n"
+            case "\r": out += "\\r"
+            case "\t": out += "\\t"
+            // Line breaks to some YAML readers, which would trim the spaces around them.
+            case "\u{85}": out += "\\N"
+            case "\u{2028}": out += "\\L"
+            case "\u{2029}": out += "\\P"
+            default: out.unicodeScalars.append(scalar)
+            }
+        }
+        return out + "\""
+    }
+
+    /// Printable characters YAML allows in a plain scalar, less the ones some
+    /// readers take for line breaks (U+2028, U+2029) and the fullwidth forms.
+    private static func plainSafe(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 0x20...0x7E, 0xA0...0x2027, 0x202A...0xD7FF, 0xE000...0xFEFE, 0x10000...0x10FFFF: true
+        default: false
+        }
     }
 
     // ISO 8601 with or without fractions of a second, or a bare date at

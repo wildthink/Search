@@ -138,6 +138,36 @@ edited.root.children.last!.append(CatalogNode(concept: .new(type: "Place", title
 roundTrip("an edited catalog", edited)
 roundTrip("the Surfboard app's catalog", Catalog(catalog: catalogText, items: items, trashed: trashed))
 
+// Values that need quoting or escaping: each side writes them, and both read
+// back exactly what was written.
+let awkward = [
+    "@mention", "`code`", "%YAML", "- item", "-x", "...", ".inf", "0o17", "1e5", "true", "~",
+    "a\tb", "\ttabbed", "trailing\t", " padded ", "line\r\nbreak", "a\u{85}b", "a \u{2028} b", "\u{2029}",
+    "\u{FEFF}\tbom", "a\u{FF0C}b", #"C:\Users\new"#, "say \"hi\", then: [go] # now", "a\"b, c", "日本 🙂",
+]
+let quoting = Catalog(catalog: nil, items: [:], trashed: [:])
+for (i, s) in awkward.enumerated() {
+    var concept = CatalogConcept.new(type: CatalogConcept.websiteType, title: "Value \(i)", resource: "https://example.com/\(i)")
+    concept.summary = s
+    concept.tags = [s, "z"]
+    quoting.root.append(CatalogNode(concept: concept))
+}
+roundTrip("awkward values", quoting)
+let byID = Dictionary(uniqueKeysWithValues: quoting.root.concepts.map { ($0.id, $0) })
+let searchWrote = quoting.output(onlyChanged: false).files
+for (id, text) in searchWrote {
+    guard let want = byID[id], let read = OKFConcept(id: id, markdown: text) else { continue }
+    check(read.summary == want.summary && read.tags == want.tags,
+          "awkward values, as Search wrote them: OKFFormat read \(String(reflecting: read.summary)) \(read.tags) for \(String(reflecting: want.summary))")
+}
+let okfWrote = OKFCatalog.parse(catalogText: nil, itemFiles: searchWrote, trashFiles: [:]).serializeBundle().itemFiles
+let searchRead = Catalog(catalog: nil, items: okfWrote, trashed: [:])
+for concept in searchRead.root.concepts {
+    guard let want = byID[concept.id] else { continue }
+    check(concept.summary == want.summary && concept.tags == want.tags,
+          "awkward values, as OKFFormat wrote them: Search read \(String(reflecting: concept.summary)) \(concept.tags) for \(String(reflecting: want.summary))")
+}
+
 // Bundles on disk.
 for path in CommandLine.arguments.dropFirst() {
     let url = URL(fileURLWithPath: path)
