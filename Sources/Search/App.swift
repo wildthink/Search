@@ -244,6 +244,8 @@ struct SearchApp: App {
                 Button(browser.pageKept ? "Edit Bookmark\u{2026}" : "Add This Page") { browser.bookmarkCurrent() }
                     .shortcut("bookmarks.add")
                     .disabled(browser.active?.isBlank ?? true)
+                // Surfboard: catalogs (Surfboard/SurfboardCommands.swift).
+                SurfboardMenuItems(browser: browser)
                 Button("Show Bookmarks…") { browser.bookmarking = true }
                     .shortcut("bookmarks.show")
                 Toggle("Show Bookmarks Bar", isOn: Binding(

@@ -1,0 +1,3 @@
+# Resolved fresh each run: the check is against OKFFormat as it is now.
+.build/
+Package.resolved

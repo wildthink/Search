@@ -3568,6 +3568,8 @@ final class Browser: NSObject, ObservableObject {
     static let openable: [UTType] = [
         .html, .pdf, .image, .svg, .plainText, .json, .spreadsheet,
         UTType("net.daringfireball.markdown"), UTType("org.sqlite.sqlite3"), UTType(filenameExtension: "db"),
+        // Surfboard: catalogs (Surfboard/CatalogDocument.swift).
+        UTType(Catalogs.type),
     ].compactMap { $0 }
 
     /// Each file in a tab of its own, the last one in front; one already

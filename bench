@@ -36,6 +36,7 @@
     ./bench ext-menu PATH              the puzzle button's list, drawn to a PNG
     ./bench ext-shot ID PATH           a picture of its popup while it is open
     ./bench ext-answer yes|no|ask      test run: answer extensions' questions without asking; lists what was asked
+    ./bench catalog ID [ACTION …]      a Surfboard catalog's tab: tree, select, add, set, move, trash, save… (CatalogBench.swift)
     ./bench doc-answer save|discard|cancel|ask
                                        test run: answer "save the changes?" for documents without asking;
                                        lists the files asked about
@@ -518,6 +519,10 @@ def main(argv):
         elif args[0] == "picture" and len(args) == 2: request["path"] = args[1]
         elif args[0] == "check" and len(args) == 2: request["text"] = args[1]
         else: sys.exit(usage)
+    elif verb == "catalog":
+        # Surfboard: a catalog's tab (Sources/Search/Surfboard/CatalogBench.swift).
+        if not args: sys.exit("usage: bench catalog ID [tree|select|open|add|section|set|move|trash|restore|empty|undo|redo|save|filter] …")
+        request["id"], request["action"], request["args"] = args[0], (args[1] if len(args) > 1 else "tree"), args[2:]
     elif verb == "answer":
         if args not in (["once"], ["always"], ["no"]): sys.exit("usage: bench answer once|always|no")
         request["with"] = args[0]

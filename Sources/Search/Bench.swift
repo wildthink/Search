@@ -297,6 +297,9 @@ final class Bench {
             }
         }
 
+        // Surfboard: the fork's own commands (Surfboard/CatalogBench.swift).
+        if surfboard(verb, request, browser: browser, answer) { return }
+
         switch verb {
         case "tabs", "open", "go", "doc-answer", "close", "wait", "sleep", "pin", "select", "text", "eval", "tap", "click", "type", "submit":
             tabCommand(verb, request, browser: browser, answer)

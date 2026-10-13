@@ -98,6 +98,8 @@ enum Documents {
     /// Files Search shows in a view of its own rather than handing to WebKit.
     /// HTML and its kin are pages, and stay WebKit's, as do SVG and PDF.
     static func handles(_ url: URL) -> Bool {
+        // Surfboard: a catalog is a folder, and a document (Surfboard/CatalogDocument.swift).
+        if Catalogs.handles(url) { return true }
         guard url.isFileURL, !url.hasDirectoryPath else { return false }
         if isDatabase(url) { return true }
         guard let type = type(of: url) else { return false }
@@ -115,7 +117,10 @@ enum Documents {
 
     static func open(_ url: URL) throws -> TabContent {
         let type = type(of: url)
-        let document: TabContent = if isDatabase(url) {
+        let document: TabContent = if Catalogs.handles(url) {
+            // Surfboard: a catalog in a tab of its own.
+            try CatalogDocument(contentsOf: url, ofType: Catalogs.type)
+        } else if isDatabase(url) {
             try DatabaseDocument(contentsOf: url, ofType: "org.sqlite.sqlite3")
         } else if let type, PreviewDocument.handles(type) {
             try PreviewDocument(contentsOf: url, ofType: type.identifier)

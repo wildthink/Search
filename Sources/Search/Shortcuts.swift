@@ -234,7 +234,7 @@ struct Command: Identifiable {
         Command("history.downloads", "Downloads…", .history, KeyCombo("j", shift: true)) { $0.hoarding.toggle() },
         Command("history.clearData", "Clear Browsing Data…", .history, KeyCombo("delete", shift: true)) { $0.recallMode = .clearing },
         Command("history.clear", "Clear History", .history, nil) { $0.clearHistory() },
-    ]
+    ] + Surfboard.commands  // Surfboard: the fork's own (Surfboard/SurfboardCommands.swift).
 }
 
 /// What you've changed, on top of the defaults: a new key, or none. One for
