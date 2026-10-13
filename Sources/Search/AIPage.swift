@@ -38,12 +38,12 @@ enum AIPage {
 
     /// The page on screen in `tab`, read. Nil when there is nothing to read.
     @MainActor
-    static func read(_ tab: Tab) async -> Read? {
+    static func read(_ tab: Tab, limit: Int = limit) async -> Read? {
         // A document is read as it stands in its view, changes not yet
         // saved included: what is on screen, as with a page.
         if let document = tab.document {
             guard let text = document.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-            return shaped(title: document.url.lastPathComponent, url: document.url, text: text, links: [])
+            return shaped(title: document.url.lastPathComponent, url: document.url, text: text, links: [], limit: limit)
         }
         guard let web = tab.built else { return nil }
         let value: Any? = await withCheckedContinuation { done in
@@ -54,10 +54,10 @@ enum AIPage {
         else { return nil }
         let title = String((found["title"] as? String ?? "").prefix(300))
         let links = Array((found["links"] as? [String] ?? []).prefix(400))
-        return shaped(title: title, url: tab.pageAddress, text: text, links: links)
+        return shaped(title: title, url: tab.pageAddress, text: text, links: links, limit: limit)
     }
 
-    static func shaped(title: String, url: URL?, text: String, links: [String]) -> Read {
+    static func shaped(title: String, url: URL?, text: String, links: [String], limit: Int = limit) -> Read {
         var read: Read
         if text.count > limit {
             let head = text.prefix(limit * 2 / 3), tail = text.suffix(limit / 3)

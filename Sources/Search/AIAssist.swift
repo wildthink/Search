@@ -55,7 +55,7 @@ final class Assistant: ObservableObject, Identifiable {
         self.summary = summary
         Task { @MainActor [weak self, weak tab] in
             guard let self, let tab else { return }
-            self.read = await AIPage.read(tab)
+            self.read = await AIPage.read(tab, limit: provider.pageLimit)
             self.addressed = self.read?.addressed ?? false
             self.reading = false
             guard self.read != nil else {
@@ -70,7 +70,8 @@ final class Assistant: ObservableObject, Identifiable {
 
     /// Where it ran, for the foot of every answer.
     var place: String {
-        provider == .thisMac ? "on this Mac · \(model)"
+        provider == .apple ? "on this Mac · Apple Intelligence"
+            : provider == .thisMac ? "on this Mac · \(model)"
             : provider.isLocal ? "on this Mac · \(provider.name) · \(model)" : "sent to \(provider.name) · \(model)"
     }
 
@@ -110,7 +111,9 @@ final class Assistant: ObservableObject, Identifiable {
         }
         // The key, read now and let go with the request.
         let key = provider.isLocal ? nil : AIKeys.key(for: provider)
-        let stream = provider == .thisMac
+        let stream = provider == .apple
+            ? AppleModel.stream(system: AIPage.system(fence: fence), messages: messages)
+            : provider == .thisMac
             ? AIEngine.shared.stream(system: AIPage.system(fence: fence), messages: messages)
             : AIClient.shared.stream(provider, model: model, system: AIPage.system(fence: fence), messages: messages, key: key)
         task = Task { @MainActor [weak self] in
@@ -207,6 +210,12 @@ extension Browser {
             settingsPage = .ai
             tuning = true
             announce("The model isn't on this Mac yet")
+            return
+        }
+        if provider == .apple, AppleModel.state != .ready {
+            settingsPage = .ai
+            tuning = true
+            announce(AppleModel.said)
             return
         }
         let model = prefs.aiModel(for: provider)
@@ -425,12 +434,12 @@ struct AISettings: View {
                 Card {
                     Line("Where it runs", place) {
                         if drawn {
-                            Stand(prefs.aiProvider.map { $0.isLocal ? "\($0.name), on this Mac" : $0.name } ?? "Choose…", menu: true)
+                            Stand(prefs.aiProvider.map { $0.isLocal && !$0.isBuiltIn ? "\($0.name), on this Mac" : $0.name } ?? "Choose…", menu: true)
                         } else {
                         Picker("", selection: Binding(get: { prefs.aiProvider }, set: { prefs.aiProvider = $0 })) {
                             Text("Choose…").tag(AIProvider?.none)
-                            ForEach(AIProvider.allCases.filter { $0 != .thisMac || engine.available || prefs.aiProvider == .thisMac }) { provider in
-                                Text(provider == .thisMac ? provider.name : provider.isLocal ? "\(provider.name), on this Mac" : provider.name)
+                            ForEach(AIProvider.allCases.filter(offered)) { provider in
+                                Text(provider.isBuiltIn ? provider.name : provider.isLocal ? "\(provider.name), on this Mac" : provider.name)
                                     .tag(AIProvider?.some(provider))
                             }
                         }
@@ -441,7 +450,7 @@ struct AISettings: View {
                     }
                     if let provider = prefs.aiProvider {
                         Rule()
-                        if provider == .thisMac { onThisMac } else if provider.isLocal { localModel(provider) } else { key(provider); Rule(); cloudModel(provider) }
+                        if provider == .thisMac { onThisMac } else if provider == .apple { appleModel } else if provider.isLocal { localModel(provider) } else { key(provider); Rule(); cloudModel(provider) }
                     }
                 }
                 .onChange(of: prefs.aiProvider) { _, _ in
@@ -459,6 +468,29 @@ struct AISettings: View {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /// In the list of providers: Search's own model where its engine can
+    /// run, Apple's where macOS has it, and either one already chosen.
+    private func offered(_ provider: AIProvider) -> Bool {
+        switch provider {
+        case .thisMac: return engine.available || prefs.aiProvider == .thisMac
+        case .apple: return AppleModel.state != .unsupported || prefs.aiProvider == .apple
+        default: return true
+        }
+    }
+
+    /// Apple's model: nothing to download or choose, only whether macOS
+    /// has it ready. Asked again with Check Again, never in the background.
+    @State private var apple = AppleModel.state
+
+    @ViewBuilder
+    private var appleModel: some View {
+        Line("Model", AppleModel.said) {
+            if apple != .ready && apple != .unsupported && apple != .ineligible {
+                Pill("Check Again") { apple = AppleModel.state }
             }
         }
     }
@@ -607,7 +639,8 @@ struct AISettings: View {
         guard let provider = prefs.aiProvider else { return }
         hint = provider.isLocal ? nil : AIKeys.hint(for: provider)
         models = []
-        guard provider.isLocal else { return }
+        apple = AppleModel.state
+        guard provider.isLocal, !provider.isBuiltIn else { return }
         looking = true
         Task { @MainActor in
             models = await AIClient.shared.localModels(provider)

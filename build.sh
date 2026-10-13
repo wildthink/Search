@@ -78,6 +78,14 @@ SWIFTFLAGS=(-c "$CONFIG" --arch "$ARCH")
 swift build "${SWIFTFLAGS[@]}"
 BINARY="$(swift build "${SWIFTFLAGS[@]}" --show-bin-path)/Search"
 [ "$(lipo -archs "$BINARY")" = "$ARCH" ] || { echo "$BINARY is not a $ARCH binary" >&2; exit 1; }
+# Foundation Models (AppleModel.swift) is in macOS 26 and later only: linked
+# any way but weakly, Search wouldn't open at all on macOS 14 or 15. One use
+# of it without #available is all it takes, and nothing else would say so.
+if otool -L "$BINARY" | grep -q FoundationModels.framework \
+   && ! otool -l "$BINARY" | grep -A2 LC_LOAD_WEAK_DYLIB | grep -q FoundationModels.framework; then
+  echo "FoundationModels is linked strongly: Search wouldn't open before macOS 26 (see AppleModel.swift)" >&2
+  exit 1
+fi
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

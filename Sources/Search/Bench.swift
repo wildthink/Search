@@ -1515,9 +1515,11 @@ final class Bench {
                     answer(["error": "ai ask PROVIDER MODEL TEXT"]); return
                 }
                 let model = request["model"] as? String ?? provider.defaultModel
-                let stream = AIClient.shared.stream(provider, model: model, system: "You are a test.",
-                                                    messages: [AIMessage(role: .user, text: request["text"] as? String ?? "")],
-                                                    key: AIKeys.key(for: provider))
+                let asked = [AIMessage(role: .user, text: request["text"] as? String ?? "")]
+                let stream = provider == .apple
+                    ? AppleModel.stream(system: "You are a test.", messages: asked)
+                    : AIClient.shared.stream(provider, model: model, system: "You are a test.", messages: asked,
+                                             key: AIKeys.key(for: provider))
                 Task { @MainActor in
                     var text = "", pieces = 0
                     do {
