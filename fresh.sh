@@ -34,7 +34,7 @@ if [ "${1:-}" != "again" ]; then
   rm -rf "$HOME/Library/Application Support/Search ($WORLD)"
   defaults delete "$SUITE" 2>/dev/null || true
   # Store.probeStore(1), the fixed identifier of the world's website data.
-  rm -rf "$HOME/Library/WebKit/com.officecommun.search/WebsiteDataStore/$STORE"
+  rm -rf "$HOME/Library/WebKit/com.wildthink.search/WebsiteDataStore/$STORE"
   echo "world \"$WORLD\" wiped"
 fi
 

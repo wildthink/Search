@@ -37,7 +37,7 @@ import WebKit
 final class Passkeys: NSObject {
     static let shared = Passkeys()
 
-    private static let log = Logger(subsystem: "com.officecommun.search", category: "Passkeys")
+    private static let log = Logger(subsystem: "com.wildthink.search", category: "Passkeys")
 
     // MARK: - the Mac's permission
 

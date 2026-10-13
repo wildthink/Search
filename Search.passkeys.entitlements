@@ -14,8 +14,8 @@
        embedded in the app, which build.sh does when Search.provisionprofile
        is next to it. The two identifiers are how macOS ties the app to that
        profile: without them the restricted entitlement is refused. -->
-  <key>com.apple.application-identifier</key><string>7BYKA895MC.com.officecommun.search</string>
-  <key>com.apple.developer.team-identifier</key><string>7BYKA895MC</string>
+  <key>com.apple.application-identifier</key><string>8S7Y6KVRU5.com.wildthink.search</string>
+  <key>com.apple.developer.team-identifier</key><string>8S7Y6KVRU5</string>
   <key>com.apple.developer.web-browser.public-key-credential</key><true/>
 </dict>
 </plist>

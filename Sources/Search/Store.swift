@@ -83,7 +83,7 @@ enum Store {
     /// differ from stores made by identifier in how long extension workers
     /// are let live.
     static var ownContainer: Bool {
-        (Bundle.main.bundleIdentifier ?? "") != "com.officecommun.search"
+        (Bundle.main.bundleIdentifier ?? "") != "com.wildthink.search"
     }
 
     /// The fixed identifiers of a test world's WebKit stores: 1 for websites,
