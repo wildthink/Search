@@ -182,6 +182,14 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(Frontmatter.list(["tags: [a, \"b, c\", 'd']"]), ["a", "b, c", "d"])
         XCTAssertEqual(Frontmatter.list(["tags:", "  - one", "  - two"]), ["one", "two"])
         XCTAssertEqual(Frontmatter.value(["description: >", "  folded", "  lines"]), "folded lines")
+        // Quoted wherever YAML would read the plain text as something else.
+        for s in ["@mention", "`code`", "- item", "...", ".inf", "0o17", "\ttabbed", "trailing\t", "a\u{FF0C}b"] {
+            XCTAssertTrue(Frontmatter.scalar(s).hasPrefix("\""), s.debugDescription)
+        }
+        XCTAssertEqual(Frontmatter.scalar("é 日本 🙂"), "é 日本 🙂")
+        XCTAssertEqual(Frontmatter.scalar("a\tb\r\n\u{85}\u{2028}\u{2029}"), #""a\tb\r\n\N\L\P""#)
+        XCTAssertEqual(Frontmatter.scalarValue(#""a\tb\r\n\N\L\P\/""#), "a\tb\r\n\u{85}\u{2028}\u{2029}/")
+        XCTAssertEqual(Frontmatter.list([#"tags: ["a\"b, c", z]"#]), ["a\"b, c", "z"])
         let concept = CatalogConcept(id: "items/x.md", markdown: "---\ntype: Note\ngenerated:\n  at: 2026-05-01T10:00:00Z\n  by: someone\n---\nbody")
         XCTAssertEqual(concept?.timestamp, Frontmatter.date("2026-05-01T10:00:00Z"), "OKF 0.2's time")
         XCTAssertNil(CatalogConcept(id: "items/x.md", markdown: "no frontmatter"))
