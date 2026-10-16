@@ -50,19 +50,20 @@ enum ExtensionShims {
     /// beside an extension — which permissions it added, which shim it
     /// carries — is Search's to say, never the package's: anything by those
     /// names that came inside it goes before a word of it is read.
-    nonisolated static func prepare(_ folder: URL, fresh: Bool = false) throws {
+    nonisolated static func prepare(_ folder: URL, fresh: Bool = false, workerGeneration: Int = 0) throws {
         let files = FileManager.default
         if fresh {
             for name in [stamp, ".search-added"] { try? files.removeItem(at: folder.appendingPathComponent(name)) }
         }
         let stampURL = folder.appendingPathComponent(stamp)
-        if (try? String(contentsOf: stampURL, encoding: .utf8)) == version { return }
-        defer { try? version.write(to: stampURL, atomically: true, encoding: .utf8) }
+        let revision = version + "-worker-\(workerGeneration)"
+        if (try? String(contentsOf: stampURL, encoding: .utf8)) == revision { return }
+        defer { try? revision.write(to: stampURL, atomically: true, encoding: .utf8) }
         let manifestURL = folder.appendingPathComponent("manifest.json")
         guard var manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL)) as? [String: Any]
         else { throw Crx.Refused.unpack }
 
-        let script = shim(for: folder)
+        let script = shim(for: folder).replacingOccurrences(of: "__SEARCH_WORKER_GENERATION__", with: String(workerGeneration))
         try script.write(to: folder.appendingPathComponent(file), atomically: true, encoding: .utf8)
         try PasskeyRelay.page.write(to: folder.appendingPathComponent(passkeys), atomically: true, encoding: .utf8)
 
@@ -1056,7 +1057,154 @@ enum ExtensionShims {
           if (typeof f === "function") put(runtime, name, f.bind(runtime));
         }
       }
+      // Installed before the content-script return. Each passive subscription
+      // is bound natively to the background that this port connected to. A
+      // fresh connection that wakes a replacement must not lose its own port.
+      let checkWorker = () => {}, heard = 0;
+      let workerGeneration = Number("__SEARCH_WORKER_GENERATION__") || 0, workerSequence = 0;
+      const workerObserver = Math.random().toString(36).slice(2);
+      const workerPorts = new Set(), workerDisconnect = new WeakMap();
+      const cancelWorkerWatch = (watch) => {
+        if (!watch || !watch.waiting) return;
+        watch.waiting = false;
+        try {
+          if (inContent) root.webkit?.messageHandlers?.searchWorkerRecovery?.postMessage({ token: watch.token, cancel: true }).catch(() => {});
+          else native("background.unobserve", [watch.token]).catch(() => {});
+        } catch (e) {}
+      };
+      const collectedWorkerPort = typeof FinalizationRegistry === "function" ? new FinalizationRegistry((watch) => {
+        workerPorts.delete(watch);
+        cancelWorkerWatch(watch);
+      }) : null;
+      const watchWorker = () => {
+        if (!hasWorker) return null;
+        const token = workerObserver + ":" + (++workerSequence), expected = workerGeneration;
+        let answer;
+        try {
+          if (inContent) {
+            const bridge = root.webkit?.messageHandlers?.searchWorkerRecovery;
+            if (!bridge) return null; // Unknown WebKit world layout: keep native behavior.
+            answer = bridge.postMessage({ generation: expected, token });
+          } else answer = native("background.observe", [expected, token]);
+        } catch (e) { return null; }
+        const watch = { token, generation: expected, waiting: true, ref: null };
+        Promise.resolve(answer).then((generation) => {
+          if (!watch.waiting) return;
+          watch.waiting = false;
+          // nil means cancellation. The same context generation is valid:
+          // WebKit can replace only the background, as during an idle wake.
+          if (!Number.isSafeInteger(generation) || generation < watch.generation) return;
+          workerGeneration = Math.max(workerGeneration, generation);
+          const port = watch.ref && watch.ref.deref();
+          if (port) workerDisconnect.get(port)?.(true);
+        }, () => { watch.waiting = false; });
+        return watch;
+      };
+      if (typeof document !== "undefined" && root.addEventListener) {
+        root.addEventListener("pagehide", (event) => {
+          if (!event.persisted) for (const watch of workerPorts) cancelWorkerWatch(watch);
+        });
+      }
+      if (typeof document !== "undefined" && runtime && typeof runtime.connect === "function") {
+        const track = (port, watch) => {
+          if (workerDisconnect.has(port)) return port;
+          watch = watch === undefined ? watchWorker() : watch;
+          if (watch) {
+            watch.ref = new WeakRef(port);
+            workerPorts.add(watch);
+            collectedWorkerPort?.register(port, watch, watch);
+          }
+          try { port.onMessage.addListener(() => { heard = Date.now(); }); } catch (e) {}
+          const disconnected = event(), post = port.postMessage, disconnect = port.disconnect;
+          let closed = false;
+          const release = () => {
+            if (!watch) return;
+            workerPorts.delete(watch);
+            collectedWorkerPort?.unregister(watch);
+            cancelWorkerWatch(watch);
+          };
+          const finish = (synthetic = false) => {
+            if (closed) return;
+            closed = true;
+            release();
+            if (synthetic) try { disconnect.call(port); } catch (e) {}
+            for (const f of [...disconnected.listeners]) {
+              try { f(port); } catch (e) { setTimeout(() => { throw e; }); }
+            }
+          };
+          port.onDisconnect.addListener(() => finish());
+          const set = (key, value) => Object.defineProperty(port, key, { value, configurable: true, writable: true });
+          set("onDisconnect", disconnected);
+          set("postMessage", (message) => {
+            if (closed) throw new Error("Attempting to use a disconnected port object");
+            checkWorker();
+            return post.call(port, message);
+          });
+          set("disconnect", () => {
+            if (closed) return;
+            closed = true;
+            release();
+            disconnect.call(port);
+          });
+          workerDisconnect.set(port, finish);
+          return port;
+        };
+        const connect = runtime.connect.bind(runtime);
+        put(runtime, "connect", (...args) => {
+          if (typeof args[0] === "string" && args[0] && args[0] !== runtime.id) return connect(...args);
+          checkWorker();
+          // WebKit selects the connection's background before the following
+          // observation reads its identity. An absent/loading background is
+          // bound to the next creation, never to a retired worker.
+          return track(connect(...args));
+        });
+        const incoming = runtime.onConnect;
+        if (incoming && typeof incoming.addListener === "function") {
+          const add = incoming.addListener.bind(incoming), remove = incoming.removeListener.bind(incoming);
+          const has = incoming.hasListener.bind(incoming), wrapped = new WeakMap();
+          put(incoming, "addListener", (listener) => {
+            if (typeof listener !== "function") return add(listener);
+            let wrapper = wrapped.get(listener);
+            if (!wrapper) { wrapper = (port) => listener(track(port)); wrapped.set(listener, wrapper); }
+            return add(wrapper);
+          });
+          put(incoming, "removeListener", (listener) => remove(wrapped.get(listener) || listener));
+          put(incoming, "hasListener", (listener) => has(wrapped.get(listener) || listener));
+        }
+      }
+
       if (inContent) {
+        // A content script reads an extension page's frame as
+        // webkit-masked-url://hidden/, src and attribute alike, even a frame
+        // of its own extension that it put there itself. Chrome gives the
+        // address back, and code that posts to the frame with that address as
+        // the target origin throws instead (Affinity Pathfinder hands its
+        // panel the finished sign-in so). So an address of this extension
+        // that its scripts set is what src gives them back, and only that.
+        if (root.HTMLIFrameElement && runtime && typeof runtime.getURL === "function") {
+          const ownBase = runtime.getURL("");
+          const given = new WeakMap();
+          const remember = (frame, value) => {
+            const address = String(value);
+            if (address.startsWith(ownBase)) given.set(frame, address); else given.delete(frame);
+          };
+          const proto = HTMLIFrameElement.prototype;
+          const d = Object.getOwnPropertyDescriptor(proto, "src");
+          if (d && d.get && d.set && d.configurable) {
+            Object.defineProperty(proto, "src", Object.assign({}, d, {
+              get() {
+                const shown = d.get.call(this);
+                return given.has(this) && shown.startsWith("webkit-masked-url:") ? given.get(this) : shown;
+              },
+              set(value) { remember(this, value); d.set.call(this, value); },
+            }));
+            const setAttribute = Element.prototype.setAttribute;
+            Element.prototype.setAttribute = function (name, value) {
+              if (this instanceof HTMLIFrameElement && String(name).toLowerCase() === "src") remember(this, value);
+              return setAttribute.apply(this, arguments);
+            };
+          }
+        }
         // A frame inside this extension's own page — its offscreen
         // document reading a site, say — is part of that page's tab, and
         // WebKit brings none of its messages to the page around it. So a
@@ -1128,12 +1276,23 @@ enum ExtensionShims {
             return reply.value;
           });
         };
+        // Some members WebKit answers from the object itself, ahead of
+        // anything set on it: windows.create, update and remove, and
+        // chrome.windows on chrome. Put there, ours reads back as WebKit's,
+        // and the call still ends the process (Affinity Pathfinder's sign-in
+        // button). A namespace like that is given through a stand-in
+        // `chrome` instead, which has ours for those members and WebKit's
+        // own objects for the rest, so listeners still go on WebKit's
+        // events. `browser` is left as WebKit's.
+        const stand = new Map();
         for (const space of spaces) {
           if (direct.has(space)) continue;
           let ns; try { ns = chrome[space]; } catch (e) { continue; }
           if (!ns || typeof ns !== "object") continue;
           const names = new Set();
           for (let o = ns; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) Object.getOwnPropertyNames(o).forEach((k) => names.add(k));
+          const ours = new Map();
+          const own = (name, value) => { put(ns, name, value); ours.set(name, value); };
           for (const name of names) {
             if (name === "constructor" || /^on[A-Z]/.test(name)) continue;
             let f; try { f = ns[name]; } catch (e) { continue; }
@@ -1141,7 +1300,7 @@ enum ExtensionShims {
             // A port can't be carried over: one that closes at once, as
             // Chrome's does when nothing answers, rather than a dead process.
             if (name === "connect") {
-              put(ns, name, (...args) => {
+              own(name, (...args) => {
                 const port = { name: (args.find((a) => a && typeof a === "object") || {}).name || "", sender: undefined,
                   postMessage: () => {}, disconnect: () => {}, onMessage: event(), onDisconnect: event() };
                 setTimeout(() => {
@@ -1152,13 +1311,26 @@ enum ExtensionShims {
               });
               continue;
             }
-            put(ns, name, (...args) => {
+            own(name, (...args) => {
               const callback = args.length && typeof args[args.length - 1] === "function" ? args.pop() : null;
               const answer = ask(space, name, args);
               if (!callback) return answer;
               answer.then((value) => callback(value), (error) => withLastError(error, callback));
             });
           }
+          const lost = new Map([...ours].filter(([name, value]) => ns[name] !== value));
+          if (!lost.size) continue;
+          // What is set on the stand-in later (the blob: mending further
+          // down) replaces ours there, as it would have on WebKit's object.
+          stand.set(space, new Proxy(ns, {
+            get: (target, key) => lost.has(key) ? lost.get(key) : Reflect.get(target, key),
+            defineProperty: (target, key, d) => lost.has(key) && "value" in d ? (lost.set(key, d.value), true) : Reflect.defineProperty(target, key, d),
+          }));
+        }
+        // Set through the fixed accessor above, which takes a replacement
+        // that still carries the APIs.
+        if (stand.size) {
+          try { root.chrome = new Proxy(chrome, { get: (target, key) => stand.has(key) ? stand.get(key) : Reflect.get(target, key) }); } catch (e) {}
         }
       }
 
@@ -1176,9 +1348,6 @@ enum ExtensionShims {
         promise.then((r) => r === undefined ? withLastError(new Error(gone), callback) : callback(r),
           (e) => withLastError(e, callback));
       };
-      let checkWorker = () => {};
-      // When the worker was last heard from — a reply, a port message.
-      let heard = 0;
       if (runtime && typeof runtime.sendMessage === "function") {
         const page = typeof document !== "undefined";
         // WebKit's own, looked up at each call — not held from the page's
@@ -1261,15 +1430,6 @@ enum ExtensionShims {
           return replied(background ? alsoFramed(p, tabId, message, options) : p, callback, "Could not establish connection. Receiving end does not exist.");
         });
       }
-      if (typeof document !== "undefined" && runtime && typeof runtime.connect === "function") {
-        const connect = runtime.connect.bind(runtime);
-        put(runtime, "connect", (...args) => {
-          checkWorker();
-          const port = connect(...args);
-          try { port.onMessage.addListener(() => { heard = Date.now(); }); } catch (e) {}
-          return port;
-        });
-      }
 
       gather(runtime && runtime.onMessage, true);
       gather(runtime && runtime.onMessageExternal);
@@ -1337,7 +1497,7 @@ enum ExtensionShims {
           pending.then((id) => callback(id), (error) => withLastError(error, callback));
         });
       }
-      define("sidePanel", ["open", "setOptions", "getOptions", "setPanelBehavior", "getPanelBehavior"]);
+      define("sidePanel", ["open", "close", "setOptions", "getOptions", "setPanelBehavior", "getPanelBehavior"]);
       define("offscreen", ["createDocument", "closeDocument", "hasDocument"], [],
         { Reason: new Proxy({}, { get: (_, key) => String(key) }) });
       define("tabGroups", ["get", "query", "update", "move"],
@@ -2229,6 +2389,15 @@ enum ExtensionShims {
             const urls = filter.urls.filter((u) => !/^wss?:/i.test(u));
             if (!urls.length) return;
             filter = { ...filter, urls };
+          }
+          // Nor "webtransport" or "webbundle", which Chrome's ResourceType
+          // lists and WebKit refuses the whole listener over. AdBlock asks
+          // for every type in that list, so its worker stopped at startup and
+          // nothing was blocked. The listener is kept for the types WebKit has.
+          if (filter && Array.isArray(filter.types)) {
+            const types = filter.types.filter((t) => t !== "webtransport" && t !== "webbundle");
+            if (!types.length) return;
+            filter = { ...filter, types };
           }
           // Added after a worker's startup, WebKit refuses it; Chrome takes
           // it. It isn't heard, but neither does it stop the code that added
@@ -3269,6 +3438,10 @@ enum ExtensionShims {
     /// button should open it.
     static var panelPath: [String: String] = [:]
     static var panelOnClick: Set<String> = []
+    /// Turned off for the whole window (setOptions enabled: false).
+    static var panelOff: Set<String> = []
+    /// What setOptions said for one tab, by the extension's tab id.
+    static var panelTabs: [String: [Int: (path: String?, enabled: Bool?)]] = [:]
     /// One voice for every extension that reads aloud.
     static let speaker = NSSpeechSynthesizer()
 
@@ -3284,11 +3457,11 @@ enum ExtensionShims {
         }
     }
 
-    /// The groups an extension is shown: none while groups are off, and
-    /// never one without a tab.
+    /// The groups an extension is shown: never one without a tab. The same
+    /// with groups off in Settings, where they are kept without a heading
+    /// in the column (see the tab groups cases in `run`).
     private static func listedGroups(_ browser: Browser) -> [TabGroup] {
-        guard browser.prefs.usesTabGroups else { return [] }
-        return browser.tabGroups.filter { !browser.tabs(in: $0.id).isEmpty }
+        browser.tabGroups.filter { !browser.tabs(in: $0.id).isEmpty }
     }
 
     private static func listedGroup(_ number: Any?, in browser: Browser) throws -> TabGroup {
@@ -3573,12 +3746,32 @@ enum ExtensionShims {
         case "downloads.pause", "downloads.resume", "downloads.cancel", "downloads.removeFile", "downloads.getFileIcon":
             throw Unsupported(what: "\(api) isn't available in Search yet")
 
-        // MARK: side panel — a tab of its own, since this window has one column
+        // MARK: side panel — the window's, beside the page (SidePanel.swift)
         case "sidePanel.setOptions":
-            if let path = (first as? [String: Any])?["path"] as? String { panelPath[id] = path }
+            let options = first as? [String: Any] ?? [:]
+            if let tab = options["tabId"] as? Int {
+                var kept = panelTabs[id]?[tab] ?? (nil, nil)
+                if let path = options["path"] as? String { kept.path = path }
+                if let enabled = options["enabled"] as? Bool { kept.enabled = enabled }
+                panelTabs[id, default: [:]][tab] = kept
+            } else {
+                if let path = options["path"] as? String { panelPath[id] = path }
+                if let enabled = options["enabled"] as? Bool {
+                    if enabled { panelOff.remove(id) } else { panelOff.insert(id) }
+                }
+            }
+            // Turned off while it is up: it goes, as in Chrome.
+            if options["enabled"] as? Bool == false {
+                for browser in Browsers.all {
+                    if case .page(let shown, _, _) = browser.sidePanel, shown == id { browser.closeSidePanel() }
+                }
+            }
             return nil
         case "sidePanel.getOptions":
-            return ["enabled": true, "path": panelPath[id] ?? defaultPanel(context) ?? ""]
+            let tab = (first as? [String: Any])?["tabId"] as? Int
+            let own = tab.flatMap { panelTabs[id]?[$0] }
+            return ["enabled": own?.enabled ?? !panelOff.contains(id),
+                    "path": own?.path ?? panelPath[id] ?? defaultPanel(context) ?? ""]
         case "sidePanel.setPanelBehavior":
             if let on = (first as? [String: Any])?["openPanelOnActionClick"] as? Bool {
                 if on { panelOnClick.insert(id) } else { panelOnClick.remove(id) }
@@ -3587,7 +3780,24 @@ enum ExtensionShims {
         case "sidePanel.getPanelBehavior":
             return ["openPanelOnActionClick": panelOnClick.contains(id)]
         case "sidePanel.open":
-            openPanel(context, owner: owner)
+            // For a tab, its own page when it was given one, and the panel
+            // goes with that tab; otherwise the window's.
+            let tab = (first as? [String: Any])?["tabId"] as? Int
+            let own = tab.flatMap { panelTabs[id]?[$0] }
+            guard own?.enabled ?? !panelOff.contains(id),
+                  let path = own?.path ?? panelPath[id] ?? defaultPanel(context),
+                  let url = ExtensionShims.page(path, in: context), let browser = owner.browser
+            else { throw Unsupported(what: "No active side panel for this extension") }
+            // The panel, or, if it can't be made, the page as a tab of its
+            // own, as before there was a panel to put it in.
+            if !browser.showSidePanel(context, url: url, for: own?.path != nil ? browser.activeID : nil) {
+                browser.open(url, foreground: true)
+            }
+            return nil
+        case "sidePanel.close":
+            for browser in Browsers.all {
+                if case .page(let shown, _, _) = browser.sidePanel, shown == id { browser.closeSidePanel() }
+            }
             return nil
 
         // MARK: offscreen — a page with a DOM for a worker that has none
@@ -3728,6 +3938,13 @@ enum ExtensionShims {
             }
 
         // MARK: the worker, up before a page talks to it
+        case "background.observe":
+            guard owner.contexts[id] === context, context.isLoaded else { return nil }
+            return await ExtensionWorkerRecovery.shared.observe(id, generation: first as? Int ?? 0, token: args.dropFirst().first as? String ?? "")
+        case "background.unobserve":
+            guard owner.contexts[id] === context else { return nil }
+            ExtensionWorkerRecovery.shared.cancel(id, token: first as? String ?? "")
+            return nil
         case "background.wake":
             guard context.webExtension.hasBackgroundContent else { return nil }
             // WebKit sometimes fails to start a worker again after unloading
@@ -3758,8 +3975,7 @@ enum ExtensionShims {
         // A page found the worker gone though WebKit believes it runs (see
         // the shim's ping).
         case "background.revive":
-            owner.revive(id, because: "its worker stopped answering")
-            return nil
+            return owner.revive(id, because: "its worker stopped answering")
 
         // MARK: what went wrong inside
         case "debug.error":
@@ -4031,12 +4247,16 @@ enum ExtensionShims {
             }
 
         // MARK: tab groups
-        // Only while they are on (Settings › Tabs): off, they sleep, for
-        // extensions as on screen. A group without a tab is never shown.
+        // Groups off in Settings › Tabs, an extension's groups are still
+        // made and kept, as Chrome would, but the column shows no heading
+        // for them, as for any group while they are off; turned on, they
+        // are there. Claude in Chrome works only in a group of its own: a
+        // refusal here left it unable to act on any tab. A group without a
+        // tab is never shown.
         case "tabs.groups":
             let places: [Any] = first as? [Any] ?? []
             return places.map { place -> Int in
-                guard browser.prefs.usesTabGroups, let tab = located(place, owner: owner),
+                guard let tab = located(place, owner: owner),
                       let home = owner.browser(of: tab), let group = home.group(of: tab) else { return -1 }
                 return TabGroup.number(group)
             }
@@ -4058,7 +4278,6 @@ enum ExtensionShims {
         case "tabGroups.move":
             throw Unsupported(what: "Search can't move a tab group for an extension")
         case "tabs.group":
-            guard browser.prefs.usesTabGroups else { throw Unsupported(what: "Tab groups are off in Search's settings") }
             let places: [Any] = first as? [Any] ?? []
             let tabs = places.compactMap { located($0, owner: owner) }
             guard !tabs.isEmpty else { throw Unsupported(what: "No tabs to group") }
@@ -4081,7 +4300,6 @@ enum ExtensionShims {
             for tab in tabs { browser.move(tab, toGroup: target) }
             return TabGroup.number(target)
         case "tabs.ungroup":
-            guard browser.prefs.usesTabGroups else { return nil }
             let places: [Any] = first as? [Any] ?? []
             for tab in places.compactMap({ located($0, owner: owner) }) {
                 owner.browser(of: tab)?.move(tab, toGroup: nil)
@@ -4282,13 +4500,21 @@ enum ExtensionShims {
         return url
     }
 
+    /// The extension's button, for one that asked for its panel on a
+    /// press (openPanelOnActionClick): its panel up, or down again.
     static func openPanel(_ context: WKWebExtensionContext, owner: Extensions) {
-        guard let path = panelPath[context.uniqueIdentifier] ?? defaultPanel(context) else { return }
+        let id = context.uniqueIdentifier
+        guard !panelOff.contains(id), let path = panelPath[id] ?? defaultPanel(context) else { return }
         // Resolved, not appended: a path can carry a query — Claude's names
         // the tab its panel is for, sidepanel.html?tabId=… — which appended
         // would be escaped into the file's name.
         guard let url = ExtensionShims.page(path, in: context) else { return }
-        owner.browser?.open(url, foreground: true)
+        // In the side panel; a tab of its own if the panel can't be made,
+        // as before there was a panel to put it in.
+        guard let browser = owner.browser else { return }
+        if !browser.toggleSidePanel(context, url: url) {
+            browser.open(url, foreground: true)
+        }
     }
 
     // MARK: - bookmarks, as Chrome shapes them

@@ -79,7 +79,7 @@ Some of the fork's work isn't Surfboard-specific and was written in upstream's
 own style, in upstream's files, so it can be offered back as pull requests:
 
 - Documents in tabs: Markdown, JSON, SQLite, spreadsheets (`TabContent.swift`, `DatabaseDocument.swift`, `PreviewDocument.swift`, `JSONTree.swift`)
-- Local files opened from anywhere (`Browser.swift`, `Tab.swift`)
+- Local files opened from anywhere — links, ⌘O, Open Recent, sessions (`Browser.swift`, `Tab.swift`). A path typed in the address field, and other text files shown as text, are upstream's own since 1.0.5 (`Address.file(from:)`, `LocalText.swift`); the fork's document tabs take Markdown, JSON, plain text, SQLite and spreadsheets before WebKit sees them
 - Apple Intelligence as an AI provider (`AppleModel.swift`)
 - The debug build for the bench, and the split of `Bench.handle`
 

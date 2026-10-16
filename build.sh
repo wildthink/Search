@@ -199,6 +199,20 @@ cat > "$APP/Contents/Info.plist" <<PLIST
       <key>LSItemContentTypes</key>
       <array><string>public.xhtml</string></array>
     </dict>
+    <!-- What a browser shows besides pages, listed under the Finder's Open
+         With (#524): a PDF, a picture. (Plain text and JSON are below, as
+         documents Search edits.) Alternate, so Search is offered there and
+         never becomes what opens them on a double-click. Pictures by name
+         rather than public.image, which takes in SVG: an SVG can carry a
+         script, and opened from the Finder it would run with its folder to
+         read. -->
+    <dict>
+      <key>CFBundleTypeName</key><string>Document</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array><string>com.adobe.pdf</string><string>public.png</string><string>public.jpeg</string><string>com.compuserve.gif</string><string>public.heic</string><string>org.webmproject.webp</string><string>public.tiff</string></array>
+    </dict>
     <!-- Text files Search opens in a tab of its own and can edit (see
          TabContent.swift). Alternate: listed under Open With, never made
          the file's default app by being installed. -->

@@ -229,24 +229,6 @@ final class DocumentTests: XCTestCase {
         XCTAssertTrue(Documents.handles(small))
     }
 
-    // MARK: - a path typed in the address bar
-
-    func testAPathToAFileTypedIsThatFile() throws {
-        let url = try file("my notes.md", "# Notes\n")
-        XCTAssertEqual(Address.url(from: url.path)?.standardizedFileURL, url.standardizedFileURL, "spaces and all")
-        XCTAssertEqual(Address.url(from: "  \(url.path)\n")?.isFileURL, true)
-        XCTAssertNil(Address.url(from: folder.path), "a folder is not opened")
-        XCTAssertNil(Address.url(from: folder.appendingPathComponent("missing.md").path))
-        XCTAssertNil(Address.url(from: "/"))
-
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let inHome = home.appendingPathComponent(".search-address-test-\(UUID().uuidString).txt")
-        try "x".write(to: inHome, atomically: true, encoding: .utf8)
-        defer { try? FileManager.default.removeItem(at: inHome) }
-        XCTAssertEqual(Address.url(from: "~/" + inHome.lastPathComponent)?.standardizedFileURL, inHome.standardizedFileURL)
-        XCTAssertEqual(Address.url(from: "example.com")?.host(), "example.com", "addresses as before")
-    }
-
     // MARK: - spreadsheets, shown by Quick Look
 
     func testSpreadsheetsAreShownByQuickLookAndNeverWritten() throws {

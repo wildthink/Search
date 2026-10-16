@@ -14,6 +14,8 @@ struct Page: View {
     /// False where the page itself is held elsewhere (see PaneStage.swift)
     /// and only what goes over it is wanted here.
     var holdsPage = true
+    /// The page's corners, as a card on the window's frame (see CardEdge).
+    var corner: CGFloat = 0
 
     var body: some View {
         ZStack {
@@ -25,20 +27,22 @@ struct Page: View {
             // the stage was never told to take it back when it landed, and
             // the tab stayed empty. Nothing, then the page, is a change.
             if holdsPage {
-                WebStage(page: tab.stageView)
+                WebStage(page: tab.stageView, corner: corner)
             }
 
             if let cover = tab.cover {
                 // The page as it was left, while it is rebuilt underneath —
                 // anchored where the page itself starts, and never in the
-                // way of a click meant for the page.
+                // way of a click meant for the page. Up at once, since what
+                // it covers is not fit to be seen (a page waking up, or one
+                // landing from the floating window); off with a fade.
                 Image(nsImage: cover)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .clipped()
                     .allowsHitTesting(false)
-                    .transition(.opacity)
+                    .transition(.asymmetric(insertion: .identity, removal: .opacity))
             }
 
             if tab.floating {
@@ -57,7 +61,23 @@ struct Page: View {
                     .transition(.opacity)
             }
 
-            if let pull = tab.pull, pull.stops != nil {
+            Swiping(pull: tab.pull)
+        }
+        .animation(Motion.quick, value: tab.failure)
+        .animation(Motion.quick, value: tab.floating)
+        .animation(.easeOut(duration: 0.2), value: tab.cover == nil)
+        .animation(.easeOut(duration: 0.16), value: tab.pull == nil)
+    }
+}
+
+/// What a sideways swipe puts over the page: the disc, or the list a held
+/// one opens. The page's own stage, and a small window's (Little.swift).
+struct Swiping: View {
+    let pull: Pull?
+
+    var body: some View {
+        ZStack {
+            if let pull, pull.stops != nil {
                 // In the disc's place, grown from its own edge: it sits in a
                 // frame as wide as the window, and grown from that frame's
                 // middle it would slide in from the middle.
@@ -67,7 +87,7 @@ struct Page: View {
                         insertion: .opacity.combined(with: .scale(scale: 0.92, anchor: pull.back ? .leading : .trailing)),
                         removal: .opacity.combined(with: .scale(scale: 0.96, anchor: pull.back ? .leading : .trailing))
                     ))
-            } else if let pull = tab.pull {
+            } else if let pull {
                 Disc(pull: pull)
                     // A disc for each edge, never one that changes edges: a
                     // view whose alignment flips is a view that glides the
@@ -79,10 +99,6 @@ struct Page: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.85)))
             }
         }
-        .animation(Motion.quick, value: tab.failure)
-        .animation(Motion.quick, value: tab.floating)
-        .animation(.easeOut(duration: 0.2), value: tab.cover == nil)
-        .animation(.easeOut(duration: 0.16), value: tab.pull == nil)
     }
 }
 
@@ -116,7 +132,8 @@ private struct Disc: View {
                 .stroke(Palette.ink, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .padding(0.75)
-            Image(systemName: pull.back ? "arrow.left" : "arrow.right")
+            // Back from a small window's first page closes it, and says so.
+            Image(systemName: pull.leaves ? "xmark" : pull.back ? "arrow.left" : "arrow.right")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Palette.ink.opacity(0.4 + 0.6 * grown))
         }
@@ -200,10 +217,20 @@ private struct HistoryList: View {
 /// reload, no lost scroll position, no forgotten form.
 struct WebStage: NSViewRepresentable {
     let page: NSView?
+    var corner: CGFloat = 0
+
+    // The hosted page's previous bounds are not an ideal size for this layout.
+    // Accept the offered room so a window can shrink around its browser chrome.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: StageView, context: Context) -> CGSize? {
+        guard let width = proposal.width, let height = proposal.height,
+              width.isFinite, height.isFinite else { return nil }
+        return CGSize(width: width, height: height)
+    }
 
     func makeNSView(context: Context) -> StageView { StageView() }
 
     func updateNSView(_ view: StageView, context: Context) {
+        view.corner = corner
         view.show(page)
     }
 }
@@ -222,12 +249,46 @@ final class StageView: NSView {
     /// every layout. Nothing to fall out of step with.
     private weak var wanted: NSView?
 
+    /// A page on its way out to the floating window (Browser.lift), kept
+    /// here unseen under the one on show until the little window takes it,
+    /// or it turns out to have nothing playing. Taken out of every window
+    /// as the tab changed, the page let go of the layers it had drawn and
+    /// built them all again in the little window, its video last; going out
+    /// by switching tabs still jumped where ⇧⌘P didn't. Kept in a window,
+    /// it goes out the way ⇧⌘P sends it.
+    private weak var parting: NSView?
+
+    func keep(_ page: NSView) {
+        guard page.superview === self else { return }
+        parting = page
+    }
+
+    func letGo(_ page: NSView) {
+        guard parting === page else { return }
+        parting = nil
+        if page.superview === self, page !== wanted { page.removeFromSuperview() }
+        page.alphaValue = 1
+    }
+
     /// The Web Inspector each page off show had docked beside it. WebKit
     /// docks it once, on show; a page coming back without it was laid out
     /// short, beside an empty space. Weak both ways: a closed tab's page
     /// takes its entry with it, and an inspector is kept by WebKit while it
     /// is open, never by this.
     private static let docks = NSMapTable<NSView, NSView>.weakToWeakObjects()
+
+    /// Round, as the page's card is (see CardEdge): the web view is cut to
+    /// the corners by this view's own layer, which a clip of SwiftUI's isn't
+    /// always carried down to.
+    var corner: CGFloat = 0 {
+        didSet {
+            guard corner != oldValue else { return }
+            wantsLayer = true
+            layer?.cornerRadius = corner
+            layer?.cornerCurve = .continuous
+            layer?.masksToBounds = corner > 0
+        }
+    }
 
     override func layout() {
         super.layout()
@@ -250,6 +311,10 @@ final class StageView: NSView {
     }
 
     func show(_ page: NSView?) {
+        if let page, page === parting {
+            parting = nil
+            page.alphaValue = 1
+        }
         if let leaving = wanted, leaving !== page, let dock = subviews.first(where: Self.isInspector) {
             Self.docks.setObject(dock, forKey: leaving)
             dock.removeFromSuperview()
@@ -263,8 +328,16 @@ final class StageView: NSView {
         // window, with a placeholder left here in its place. The chrome
         // stepping aside lays this stage out again in that same moment, and
         // taking the page back then left the screen black with the sound
-        // still playing. WebKit puts it back itself on the way out.
-        if let web = wanted as? WKWebView, web.fullscreenState != .notInFullscreen { return }
+        // still playing. WebKit puts it back itself on the way out, at the
+        // placeholder's frame: kept at this stage's size, the chrome having
+        // come back before that (see Tab.immersed), the page comes home at
+        // its own size and is laid out once.
+        if let web = wanted as? WKWebView, web.fullscreenState != .notInFullscreen {
+            for view in subviews where view !== web && Self.isPlaceholder(view) && view.frame != bounds {
+                view.frame = bounds
+            }
+            return
+        }
 
         // Anything here that isn't wanted, out. Only ever what is actually
         // ours: a page may be somewhere else on purpose. Except the Web
@@ -273,6 +346,12 @@ final class StageView: NSView {
         // resize, it left the page shrunk beside nothing (#91).
         let docked = inspecting
         for view in subviews where view !== wanted && !(docked && Self.isInspector(view)) {
+            // Unseen, and still drawn: WebKit asks whether its view is in a
+            // window and not hidden, not whether anything shows of it.
+            if view === parting {
+                view.alphaValue = 0
+                continue
+            }
             view.removeFromSuperview()
         }
 
@@ -306,6 +385,13 @@ final class StageView: NSView {
         }
     }
 
+    /// Nothing reaches a page kept unseen.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        if let parting, let hit, hit === parting || hit.isDescendant(of: parting) { return nil }
+        return hit
+    }
+
     /// Whether the page on show has its Web Inspector up. WebKit answers only
     /// through names outside its public framework, asked for before use (see
     /// Inspector.swift).
@@ -317,6 +403,11 @@ final class StageView: NSView {
         guard inspector.responds(to: visible) else { return false }
         typealias Getter = @convention(c) (AnyObject, Selector) -> Bool
         return unsafeBitCast(inspector.method(for: visible), to: Getter.self)(inspector, visible)
+    }
+
+    /// What WebKit leaves in a page's place while it fills the screen.
+    private static func isPlaceholder(_ view: NSView) -> Bool {
+        String(describing: type(of: view)).contains("FullScreenPlaceholder")
     }
 
     private static func isInspector(_ view: NSView) -> Bool {

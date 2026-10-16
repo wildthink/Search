@@ -10,20 +10,18 @@ enum Address {
     /// here rather than opening a blank tab.
     private static let ours: Set<String> = ["http", "https", "file", "about", "data"]
 
-    /// The file at `path`, `~` for the home folder, when there is one.
-    private static func file(at path: String) -> URL? {
-        let full = (path as NSString).expandingTildeInPath
-        var folder: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: full, isDirectory: &folder), !folder.boolValue else { return nil }
-        return URL(fileURLWithPath: full)
+    /// Only committed navigation checks the disk; suggestions and dropped text never do.
+    static func file(from typed: String) -> URL? {
+        let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (text.hasPrefix("/") && !text.hasPrefix("//")) || text.hasPrefix("~/") else { return nil }
+        let path = (text as NSString).expandingTildeInPath
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+              attributes[.type] as? FileAttributeType == .typeRegular else { return nil }
+        return URL(fileURLWithPath: path)
     }
 
     static func url(from typed: String) -> URL? {
         let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
-        // A file on this Mac, by its path as the Terminal or the Finder's
-        // Copy as Pathname writes it — spaces and all. Only one that is
-        // there, and not a folder: "/" or "~" alone means nothing here.
-        if text.hasPrefix("/") || text.hasPrefix("~/"), let file = file(at: text) { return file }
         guard !text.isEmpty, !text.contains(" ") else { return nil }
 
         // Written with a scheme, it is taken at its word.
@@ -53,18 +51,20 @@ enum Address {
             || host.hasSuffix(".local")
             || host == "127.0.0.1"
             || host == "0.0.0.0"
-            || host.hasPrefix("192.168.")
-            || host.hasPrefix("10.")
             || privateRange(host)
         return URL(string: (local ? "http://" : "https://") + text)
     }
 
-    /// 172.16.0.0 to 172.31.255.255, the third private range, where Docker
-    /// and many offices put their machines.
+    /// The private ranges, where Docker and many offices put their machines.
+    /// Four numbers and nothing more, as Dialogs.isLoopback has it: 10.io is
+    /// a website, not 10.0.0.0/8.
     private static func privateRange(_ host: String) -> Bool {
-        let parts = host.split(separator: ".")
-        guard parts.count == 4, parts[0] == "172", let second = Int(parts[1]) else { return false }
-        return (16...31).contains(second)
+        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
+        let octets = parts.compactMap { UInt8($0) }
+        guard parts.count == 4, octets.count == 4 else { return false }
+        return octets[0] == 10
+            || (octets[0] == 192 && octets[1] == 168)
+            || (octets[0] == 172 && (16...31).contains(octets[1]))
     }
 
     /// Dev servers say they are listening on 0.0.0.0 — every address this
