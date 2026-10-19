@@ -91,7 +91,7 @@ struct KeyCombo: Codable, Hashable {
     }
 
     /// macOS's own, the ones every text field relies on, and the ones Search
-    /// keeps for itself: ⌘1–⌘9 for tabs, ⌃1–⌃9 for spaces, Tab and Escape
+    /// keeps for itself: ⌘1–⌘9 for tabs, Tab and Escape
     /// with anything. Not ours to give, and so never taken from the Mac.
     static func isReserved(_ combo: KeyCombo) -> Bool {
         let system: Set<KeyCombo> = [
@@ -105,7 +105,7 @@ struct KeyCombo: Codable, Hashable {
         ]
         if system.contains(combo) || combo.key == "tab" || combo.key == "escape" { return true }
         let digit = combo.key.count == 1 && ("1"..."9").contains(combo.key)
-        return digit && !combo.option && !combo.shift && (combo.command != combo.control)
+        return digit && !combo.option && !combo.shift && combo.command && !combo.control
     }
 
     /// Keys an extension never has, wherever Search's own commands are:
@@ -120,7 +120,7 @@ struct KeyCombo: Codable, Hashable {
 /// A menu command, and the key it has unless you give it another.
 struct Command: Identifiable {
     enum Section: String, CaseIterable {
-        case app = "Search", file = "File", edit = "Edit", view = "View", tabs = "Tabs", bookmarks = "Bookmarks", history = "History"
+        case app = "Search", file = "File", edit = "Edit", view = "View", tabs = "Tabs", spaces = "Spaces", bookmarks = "Bookmarks", history = "History"
     }
 
     let id: String
@@ -170,6 +170,8 @@ struct Command: Identifiable {
         Command("view.reloadOrigin", "Reload Page From Origin", .view, KeyCombo("r", option: true)) { $0.reload(fromOrigin: true) },
         Command("view.reader", "Reading Mode", .view, KeyCombo("r", shift: true)) { $0.toggleReader() },
         Command("view.float", "Float Video", .view, KeyCombo("p", shift: true)) { $0.toggleFloat() },
+        Command("view.dusk", "Darken This Site", .view, KeyCombo("d", shift: true)) { $0.toggleDusk() },
+        Command("view.duskPause", "Pause Darkening", .view, KeyCombo("d", shift: true, option: true)) { $0.pauseDusk() },
         Command("view.summarize", "Summarize Page", .view, nil) { $0.summarizePage() },
         Command("view.ask", "Ask About This Page…", .view, nil) { $0.askAboutPage() },
         Command("view.hide", "Hide Elements…", .view, KeyCombo("h", shift: true)) { $0.toggleHiding() },
@@ -236,7 +238,12 @@ struct Command: Identifiable {
         Command("history.downloads", "Downloads…", .history, KeyCombo("j", shift: true)) { $0.hoarding.toggle() },
         Command("history.clearData", "Clear Browsing Data…", .history, KeyCombo("delete", shift: true)) { $0.recallMode = .clearing },
         Command("history.clear", "Clear History", .history, nil) { $0.clearHistory() },
-    ] + Surfboard.commands  // Surfboard: the fork's own (Surfboard/SurfboardCommands.swift).
+    ] + (1...9).map { number in
+        Command("spaces.\(number)", "Space \(number)", .spaces,
+                KeyCombo(String(number), command: false, control: true)) { browser in
+            browser.switchSpace(index: number - 1)
+        }
+    } + Surfboard.commands  // Surfboard: the fork's own (Surfboard/SurfboardCommands.swift).
 }
 
 /// What you've changed, on top of the defaults: a new key, or none. One for
@@ -255,7 +262,7 @@ final class ShortcutStore: ObservableObject {
     /// (see `adopt`), by its id here: "ext:" + extension + ":" + command.
     private var manifest: [String: Override] = [:]
 
-    private init() {
+    init() {
         // Read with the same rules the Settings box keeps: a key that isn't
         // ours to give stays the Mac's, whatever the file says.
         let saved = Store.settings.data(forKey: "shortcuts")
@@ -281,9 +288,9 @@ final class ShortcutStore: ObservableObject {
     func isChanged(_ id: String) -> Bool { changed[id] != nil }
     var anyChanged: Bool { !changed.isEmpty }
 
-    /// A command you gave `combo`, for the key monitor to run.
-    func changedCommand(on combo: KeyCombo) -> Command? {
-        Command.all.first { changed[$0.id] != nil && key(for: $0.id) == combo }
+    /// Changed commands, and Space keys which have no menu to handle their defaults.
+    func customCommand(on combo: KeyCombo) -> Command? {
+        Command.all.first { (changed[$0.id] != nil || $0.section == .spaces) && key(for: $0.id) == combo }
     }
 
     /// A key an extension may not have: one of the Mac's, or one of
@@ -324,9 +331,8 @@ final class ShortcutStore: ObservableObject {
     func clear(_ id: String) { set(nil, for: id) }
 
     func reset(_ id: String) {
-        changed[id] = nil
-        save()
-        applyExtensions()
+        if let key = defaultKey(for: id) { assign(key, to: id) }
+        else { set(nil, for: id) }
     }
 
     func resetAll() {
@@ -439,4 +445,6 @@ extension Command {
                                      "tabs.swapSplit", "tabs.separateSplit"]
     /// The AI add-on's: with it off, not listed.
     static let ai: Set<String> = ["view.summarize", "view.ask"]
+    /// Dark pages': with them off, not listed, and their keys go on to the page.
+    static let dusk: Set<String> = ["view.dusk", "view.duskPause"]
 }

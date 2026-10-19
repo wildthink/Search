@@ -29,7 +29,7 @@ enum Web {
     /// included, and registering a name twice is a hard crash.
     @MainActor static func release(_ controller: WKUserContentController) {
         for name in [ScrollRelay.name, VeilRelay.name, FormRelay.name, ImageRelay.name,
-                     StoreRelay.name, PasskeyRelay.name, MiddleRelay.name, IconRelay.name, PopupGestureRelay.name] {
+                     StoreRelay.name, PasskeyRelay.name, MiddleRelay.name, IconRelay.name, PopupGestureRelay.name, DuskRelay.name] {
             controller.removeScriptMessageHandler(forName: name, contentWorld: world)
             controller.removeScriptMessageHandler(forName: name, contentWorld: .page)
         }
@@ -352,6 +352,11 @@ final class Tab: ObservableObject, Identifiable {
     /// with it. Kept apart from the rest of the tab (see Reading): it changes
     /// all the way down a page, and only the fill has any use for it.
     let meter = Reading()
+    /// How long the page is, in screens of it: one for a page that doesn't
+    /// scroll. Read with the meter, from the same report; nothing is drawn
+    /// from it as it changes (see TabSwitcher's moons). None before the page
+    /// has said.
+    private(set) var screens: Double?
     var reading: Double {
         get { meter.value }
         set { if meter.value != newValue { meter.value = newValue } }
@@ -478,6 +483,14 @@ final class Tab: ObservableObject, Identifiable {
     /// True while something on the page is making noise, so the row can say
     /// which tab it is coming from.
     @Published var noisy = false
+    /// Darkened by Search, as its page last said (see Dusk.swift).
+    @Published var dusked = false
+    /// What the page measured: true, dark by itself; nil, not yet measured.
+    var duskNative: Bool?
+    /// The page's frames that asked whether it is darkened, to be told
+    /// when that changes. Let go of with the page (see Browser's
+    /// decidePolicyFor).
+    var duskFrames: [WKFrameInfo] = []
     /// Silenced by hand from its speaker or its menu: the page plays on and
     /// is not heard. WebKit keeps the mute on the view from one page to the
     /// next, so it is only set again on a view built new, as a sleeping tab
@@ -545,10 +558,19 @@ final class Tab: ObservableObject, Identifiable {
     private let shop = StoreRelay()
     private let iconChanges = IconRelay()
     private let middles = MiddleRelay()
+    private let dusk = DuskRelay()
     var popupGesture = PopupGesture()
     private let passkeyRelay = PasskeyRelay()
     private let hovered = HoveredLink()
     private let ears = AudioWatch()
+
+    // Private exceptions belong only to this tab, never its session record.
+    @Published var awakeSites: Set<String> = []
+
+    var awakeHost: String? {
+        guard let address, ["http", "https"].contains(address.scheme?.lowercased()) else { return nil }
+        return address.host()?.lowercased()
+    }
 
     /// A tab that keeps nothing: its own cookies, no history, no place in the
     /// session. Signed in as nobody, and forgotten when it goes.
@@ -722,6 +744,7 @@ final class Tab: ObservableObject, Identifiable {
         hovered.tab = self
         controller.add(hovered, contentWorld: .defaultClient, name: HoveredLink.name)
         controller.add(middles, contentWorld: Web.world, name: MiddleRelay.name)
+        controller.add(dusk, contentWorld: Web.world, name: DuskRelay.name)
         PopupGestureRelay.install(on: controller)
         Shield.shared.protect(controller)
         built = web
@@ -756,6 +779,9 @@ final class Tab: ObservableObject, Identifiable {
                         self.committed = fresh
                     }
                     if moved { self.adoptIcon() }
+                    // A darkened page that moved to another address of its
+                    // own is watched again for a while (see Dusk.swift).
+                    if self.dusked, !moved { self.built?.evaluateInSearch("window.__officeDusk && window.__officeDusk.again()") }
                 }
             },
             web.observe(\.estimatedProgress, options: [.new]) { [weak self] _, _ in
@@ -794,6 +820,7 @@ final class Tab: ObservableObject, Identifiable {
         shop.tab = self
         iconChanges.tab = self
         middles.tab = self
+        dusk.tab = self
         ears.watch(web) { [weak self] on in self?.noisy = on }
         return web
     }
@@ -833,7 +860,10 @@ final class Tab: ObservableObject, Identifiable {
     /// pointing mode, and this site's stylesheet of things you have hidden. The
     /// stylesheet goes in before the document has a body, so nothing is ever
     /// seen arriving and then leaving again.
-    func arm(hiding css: String) {
+    /// `to`: where the next document comes from, when that isn't the page up
+    /// now (a navigation just decided). Dark pages hand that one site's
+    /// answer over, and nothing at all to a page that isn't to be darkened.
+    func arm(hiding css: String, to url: URL? = nil) {
         veils = css
         guard let built else { return }
         let controller = built.configuration.userContentController
@@ -912,6 +942,15 @@ final class Tab: ObservableObject, Identifiable {
         controller.addUserScript(
             WKUserScript(source: PasskeyRelay.bridge, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
         )
+        // Only while it is on and not paused: otherwise pages get nothing
+        // (see Dusk.swift). Before the document, so a site known to be light
+        // is never seen white. Every frame: a frame darkens its own document,
+        // led by its page.
+        if let dusk = Dusk.shared.script(for: Dusk.host(of: url ?? pageAddress)) {
+            controller.addUserScript(
+                WKUserScript(source: dusk, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
+            )
+        }
         guard !css.isEmpty else { return }
         controller.addUserScript(
             WKUserScript(source: Veiling.style(css), injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
@@ -1072,7 +1111,8 @@ final class Tab: ObservableObject, Identifiable {
 
     /// Called from the page, a few dozen times a second at most — the script
     /// already waits for a frame before it says anything.
-    func scrolled(to y: Double, of ceiling: Double) {
+    func scrolled(to y: Double, of ceiling: Double, screens: Double? = nil) {
+        if let screens { self.screens = (max(1, screens) * 10).rounded() / 10 }
         // In hundredths, and only when that changes. The page reports once a
         // frame while it scrolls — 120 times a second on a 120 Hz screen — and
         // each new value had the window redraw the tab's fill, a third of a
@@ -2318,7 +2358,8 @@ final class ScrollRelay: NSObject, WKScriptMessageHandler {
         guard let y = body["y"] as? Double,
               let ceiling = body["max"] as? Double
         else { return }
-        MainActor.assumeIsolated { tab?.scrolled(to: y, of: ceiling) }
+        let screens = body["screens"] as? Double
+        MainActor.assumeIsolated { tab?.scrolled(to: y, of: ceiling, screens: screens) }
     }
 
     /// Reports at most once a frame, and passively, so a page that scrolls
@@ -2330,7 +2371,8 @@ final class ScrollRelay: NSObject, WKScriptMessageHandler {
         var root = document.documentElement;
         var y = window.scrollY || root.scrollTop || 0;
         var ceiling = Math.max(1, (root.scrollHeight || 0) - window.innerHeight);
-        window.webkit.messageHandlers.\(name).postMessage({ y: y, max: ceiling });
+        var screens = (root.scrollHeight || 0) / Math.max(1, window.innerHeight);
+        window.webkit.messageHandlers.\(name).postMessage({ y: y, max: ceiling, screens: screens });
       }
       window.addEventListener('scroll', function () {
         if (waiting) return;

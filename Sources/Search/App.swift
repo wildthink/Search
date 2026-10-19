@@ -148,6 +148,21 @@ struct SearchApp: App {
                     .shortcut("view.reader")
                 Button("Float Video") { browser.toggleFloat() }
                     .shortcut("view.float")
+                // Dark pages, only once they are on (Settings › Appearance).
+                if browser.prefs.darkensPages {
+                    Divider()
+                    Toggle("Darken This Site", isOn: Binding(
+                        get: { browser.active?.dusked ?? false },
+                        set: { _ in browser.toggleDusk() }
+                    ))
+                    .shortcut("view.dusk")
+                    .disabled(!browser.canDusk)
+                    Toggle("Pause Darkening", isOn: Binding(
+                        get: { Dusk.shared.paused },
+                        set: { _ in browser.pauseDusk() }
+                    ))
+                    .shortcut("view.duskPause")
+                }
                 // The AI add-on's, only once it is on (Settings › AI).
                 if browser.prefs.ai {
                     Divider()
@@ -380,11 +395,17 @@ private final class CursorGroundView: NSView {
     }
 }
 
+private final class WeakWindow {
+    weak var window: NSWindow?
+}
+
 struct ContentView: View {
     @ObservedObject var browser: Browser
 
-    @State private var keys: Any?
-    @State private var window: NSWindow?
+    /// Its window, held weakly: the window holds this view's state, and
+    /// held strongly back, a window closed for good was never freed.
+    @State private var held = WeakWindow()
+    private var window: NSWindow? { held.window }
     @State private var resting: RestingLights?
     /// The room the page leaves for the column and the strip, set without
     /// animation (see `make(room:after:)`); nil only before the window is up.
@@ -706,6 +727,26 @@ struct ContentView: View {
         }
     }
 
+    /// The ⌃Tab switcher, small windows' moons included. Its own property:
+    /// written inline, body is more than the type checker will take.
+    private var switcherOverlay: some View {
+        TabSwitcherOverlay(
+            switcher: browser.tabSwitcher,
+            tab: { [browser] id in browser.tabs.first { $0.id == id } ?? LittleWindow.holding(id)?.tab },
+            current: browser.activeID,
+            pick: { [browser] id in browser.commitTabSwitch(picking: id) }
+        )
+    }
+
+    /// The window held, dressed and named for the page in front (see
+    /// WindowTitle.swift).
+    private var windowSetup: some View {
+        ZStack {
+            WindowSetup(ready: setUp)
+            if let tab = browser.active { WindowTitle(tab: tab, window: window).id(tab.id) }
+        }
+    }
+
     var body: some View {
         window_
             // The column folded away, and out again at the edge (see Fold.swift).
@@ -726,7 +767,7 @@ struct ContentView: View {
             }
             .overlay { field }
             .overlay { panels }
-            .overlay { TabSwitcherOverlay(browser: browser, switcher: browser.tabSwitcher) }
+            .overlay { switcherOverlay }
             .overlay(alignment: .topTrailing) {
                 if let job = browser.fileImport { ImportProgress(browser: browser, job: job) }
             }
@@ -734,7 +775,7 @@ struct ContentView: View {
             // is pressed the page is on its way, and the field is not what
             // there is to watch.
             .animation(browser.fieldShowing ? Motion.settle : Motion.quick, value: browser.fieldShowing)
-            .background(WindowSetup { window = $0; dress($0) })
+            .background(windowSetup)
             .onChange(of: browser.prefs.sidebar) { _, _ in
                 DispatchQueue.main.async { Lights.refresh(window); measureLights() }
             }
@@ -1065,8 +1106,19 @@ struct ContentView: View {
         view.isHidden = NSApp.isActive
     }
 
+    /// The window, once there is one: held, dressed, and named for the page
+    /// in front so its name doesn't wait for the next change.
+    private func setUp(_ window: NSWindow) {
+        held.window = window
+        dress(window)
+        if let tab = browser.active { WindowTitle.set(tab, in: window) }
+    }
+
     private func dress(_ window: NSWindow) {
         browser.window = window
+        // Off screen at once, while a link's small window keeps the browser's
+        // windows away (see Browsers.keepAway).
+        Browsers.putAway()
         window.tabbingMode = .disallowed
         // Light or dark is the app's to say (Settings › Appearance); the
         // window only has to be the ground colour that goes with it.
@@ -1091,7 +1143,7 @@ struct ContentView: View {
         // height, in both modes, without a toolbar's rounder corners — see
         // Lights.swift. The column's first row is the strip's height too, so
         // its three doors sit on the lights' line.
-        Lights.keep(window, centreX: {
+        Lights.keep(window, centreX: { window in
             browser.prefs.sidebar && browser.prefs.sidePosition == .right
                 ? window.frame.width - browser.prefs.sideWidth + Lights.centre.x
                 : Lights.centre.x
@@ -1122,8 +1174,9 @@ struct ContentView: View {
     /// the same commands for anyone looking for them, and never sees these
     /// keystrokes because this runs first.
     private func watchKeys() {
-        guard keys == nil else { return }
-        keys = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged, .leftMouseDown]) { event in
+        let id = ObjectIdentifier(browser)
+        if let old = ContentView.monitors[id] { NSEvent.removeMonitor(old) }
+        ContentView.monitors[id] = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged, .leftMouseDown]) { event in
             // A click on the tab switcher, in this window only (see
             // Browser.clickTabSwitcher), turned into the top-left coordinates
             // SwiftUI's frames are in.
@@ -1147,9 +1200,21 @@ struct ContentView: View {
                 if !event.modifierFlags.contains(.command) { browser.landSummon() }
                 return event
             }
+            if browser.holdKey(event) { return nil }
             return take(event) ? nil : event
         }
-        ContentView.keyHooks[ObjectIdentifier(browser)] = { event in take(event) ? nil : event }
+        ContentView.keyHooks[id] = { event in take(event) ? nil : event }
+    }
+
+    /// Each browser's key monitor. Kept here rather than in the view, so
+    /// that a window closed for good takes its monitor and hook with it
+    /// (see `forget`), and they no longer hold its browser.
+    private static var monitors: [ObjectIdentifier: Any] = [:]
+
+    static func forget(_ browser: Browser) {
+        let id = ObjectIdentifier(browser)
+        if let monitor = monitors.removeValue(forKey: id) { NSEvent.removeMonitor(monitor) }
+        keyHooks[id] = nil
     }
 
     /// Whether a key is this window's to act on.
@@ -1277,6 +1342,12 @@ struct ContentView: View {
                     return true
                 }
             }
+            // ⌃W, ⌃R, ⌃M, ⌃O, when Settings › Tabs has them on: the card
+            // picked, closed, reloaded, muted or kept, and the switcher stays up.
+            if browser.prefs.switcherKeys, let action = TabSwitcher.Action(event), let id = browser.tabSwitcher.selectedID {
+                if !event.isARepeat { browser.act(action, onCard: id, in: browser.tabSwitcher) }
+                return true
+            }
             browser.tabSwitcher.cancel()
             if event.keyCode == 53 { return true }
         }
@@ -1396,23 +1467,14 @@ struct ContentView: View {
             return false
         }
 
-        // ⌃1–⌃9 go to that space, when there are spaces — by the key, as
-        // ⌘1–⌘9 are below, so the top row works on every layout.
-        if browser.prefs.usesSpaces, flags.contains(.control),
-           flags.isDisjoint(with: [.command, .option, .shift]),
-           let number = ContentView.digits[event.keyCode], number > 0 {
-            browser.switchSpace(index: number - 1)
-            return true
-        }
-
-        // Your own keys (Settings › Shortcuts), before an extension's and the
-        // ones below: a command you moved runs on its new key, and a key you
-        // took off a command goes on to the page. Nothing here unless you
-        // changed something.
-        if ShortcutStore.shared.anyChanged, let combo = KeyCombo(event: event) {
-            if let command = ShortcutStore.shared.changedCommand(on: combo) {
+        // Space keys have no menu; other commands arrive here when rebound.
+        // A key taken off a command goes back to the page.
+        if ShortcutStore.shared.anyChanged || browser.prefs.usesSpaces, let combo = KeyCombo(event: event) {
+            if let command = ShortcutStore.shared.customCommand(on: combo) {
+                if command.section == .spaces, !browser.prefs.usesSpaces { return false }
                 if Command.split.contains(command.id), !browser.prefs.splitView { return false }
                 if Command.ai.contains(command.id), !browser.prefs.ai { return false }
+                if Command.dusk.contains(command.id), !browser.prefs.darkensPages { return false }
                 command.run(browser)
                 return true
             }
@@ -1435,6 +1497,15 @@ struct ContentView: View {
            event.shortcutKey == "r" {
             if pageFirst(event, key: "r", shifted: false) { return false }
             browser.reload(fromOrigin: true)
+            return true
+        }
+
+        // ⌥⇧⌘D, dark pages paused (see Dusk.swift), here rather than left to
+        // the View menu: its line only exists while dark pages are on, and a
+        // menu line that appears after launch doesn't take its key.
+        if flags.contains(.option), shifted, !flags.contains(.control), browser.prefs.darkensPages,
+           event.characters(byApplyingModifiers: [])?.lowercased() == "d" {
+            browser.pauseDusk()
             return true
         }
 
@@ -1487,6 +1558,11 @@ struct ContentView: View {
             browser.copyAddress()
         case "d" where !shifted:
             browser.duplicate()
+        // Dark pages, the site you're on (see Dusk.swift). Off, the key is
+        // the page's.
+        case "d" where shifted:
+            guard browser.prefs.darkensPages else { return false }
+            browser.toggleDusk()
         case "n" where shifted:
             browser.newShyTab()
         case "y" where !shifted:

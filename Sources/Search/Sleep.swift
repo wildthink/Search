@@ -15,6 +15,10 @@ import WebKit
 // were doing: the one on screen, pinned tabs (those are put down by hand,
 // with ⌘W), a tab playing sound, on a call, sending a download, holding its
 // video out in the little window, or holding something typed and not sent.
+// A pin stays awake only in the space on screen: in a space you aren't in it
+// sleeps after the same wait as the tabs beside it, unless its site may send
+// notifications, which a page asleep couldn't (#569). Five spaces of five
+// pins was twenty-five pages that never let go.
 //
 // Half an hour is Normal. Settings › Tabs › How soon tabs sleep makes it
 // two hours (Later) or ten minutes (Sooner).
@@ -114,7 +118,7 @@ extension Browser {
     /// the caller's business; this is everything else.
     func awake(because tab: Tab) -> String? {
         if visibleTabIDs.contains(tab.id) { return "on screen" }
-        if tab.pin != nil { return "pinned" }
+        if tab.pin != nil, let kept = pinKept(tab) { return kept }
         if tab.bench { return "a bench tab" }
         if tab.isBlank { return "blank" }
         if tab.asleep { return "already asleep" }
@@ -123,9 +127,40 @@ extension Browser {
         return busy(tab)
     }
 
+    func keepsAwake(_ tab: Tab) -> Bool {
+        guard prefs.keepsSitesAwake, let host = tab.awakeHost else { return false }
+        return (tab.shy ? tab.awakeSites : prefs.awakeSites).contains(host)
+    }
+
+    func keepAwake(_ on: Bool, for tab: Tab) {
+        guard let host = tab.awakeHost else { return }
+        if tab.shy {
+            if on { tab.awakeSites.insert(host) } else { tab.awakeSites.remove(host) }
+        } else {
+            if on { prefs.awakeSites.insert(host) } else { prefs.awakeSites.remove(host) }
+        }
+    }
+
+    /// Why a pin stays awake: always in the space on screen; in one you
+    /// aren't in, only while its site may send notifications.
+    private func pinKept(_ tab: Tab) -> String? {
+        guard parked.values.contains(where: { $0.tabs.contains { $0 === tab } }) else { return "pinned" }
+        return mayNotify(tab) ? "pinned, and its site may send notifications" : nil
+    }
+
+    /// Whether the site on the tab is allowed to send notifications (see
+    /// Notifications.swift): answered yes, with notifications on in Settings.
+    func mayNotify(_ tab: Tab) -> Bool {
+        guard prefs.siteNotifications, !tab.shy, let url = tab.address,
+              let scheme = url.scheme, let host = url.host(), !host.isEmpty else { return false }
+        let site = Browser.origin(scheme, host, url.port ?? 0)
+        return Store.settings.object(forKey: SiteNotifications.key(site)) as? Bool == true
+    }
+
     /// What the page is in the middle of that letting it go would cut off:
     /// the part of staying awake that closing a tab asks too (Closing.swift).
     func busy(_ tab: Tab) -> String? {
+        if keepsAwake(tab) { return "kept awake for this site" }
         if tab.noisy { return "playing sound" }
         if tab.floating || floating == tab.id { return "its video is out" }
         if let web = tab.built {

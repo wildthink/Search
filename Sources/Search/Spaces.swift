@@ -13,7 +13,8 @@ import WebKit
 // history, bookmarks, the passwords in the keychain, settings and
 // extensions are shared by every space. Switching swaps the row of tabs:
 // the ones left behind are parked, their sound paused, and they sleep
-// after half an hour as any tab does. ⌃1–⌃9 switch, as in Arc.
+// after half an hour as any tab does, pins included unless their site may
+// send notifications (Sleep.swift). ⌃1–⌃9 switch, as in Arc.
 
 struct Space: Codable, Identifiable, Equatable {
     var id: UUID
