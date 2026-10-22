@@ -1072,16 +1072,27 @@ enum Isolate {
       // And where the video was in the page, at what size of page, for the
       // landing to wait for (see off). Not while the last float is still
       // landing: the page isn't as it was yet, and the place it is going
-      // back to is the one kept from before.
+      // back to is the one kept from before. And whether Twitch's chat was
+      // open, for opening it again (see off).
       var wait = window.__officeFloatWait;
       if (!window.__officeFloatHome || !(window.__officeFloatLanding || (wait && wait.landing && !wait.settled))) {
         window.__officeFloatHome = {
           box: [r.left + scrollX, r.top + scrollY, r.width, r.height],
           size: [best.offsetWidth, best.offsetHeight],
-          wide: innerWidth, high: innerHeight
+          wide: innerWidth, high: innerHeight,
+          chat: !!document.querySelector('.right-column:not(.right-column--collapsed) [data-a-target="right-column__toggle-collapse-btn"]')
         };
       }
       var size = window.__officeFloatHome.size;
+      // And the picture in it, as `contain` fits it. Twitch's player, in its
+      // Studio mode, gives the video the page's whole height and draws the
+      // picture in the middle of it, between black bars: scaled whole, the
+      // bars took up the little window, and the picture a part of it.
+      var shown = size;
+      if (vw && vh && size[0] && size[1]) {
+        var within = Math.min(size[0] / vw, size[1] / vh);
+        shown = [vw * within, vh * within];
+      }
 
       // A landing still waiting for its tab is called off: the page is out
       // again.
@@ -1112,7 +1123,8 @@ enum Isolate {
         'opacity:1 !important; object-fit:contain !important; z-index:2147483647 !important}',
         // Better, where WebKit can divide one length by another: the video
         // keeps the size it had in its tab, and is only scaled to the
-        // window, as large as it goes whole and in the middle. Made the
+        // window, its picture as large as it goes whole and in the middle,
+        // and whatever is around the picture off the window's edges. Made the
         // window's size, its picture is redrawn at that size by another of
         // WebKit's processes a third of a second after everything else, and
         // until then it showed at its old size shrunk with the page, in a
@@ -1120,7 +1132,7 @@ enum Isolate {
         size[0] && size[1] ? [
           '@supports (scale: calc(100vw / 1px)) {',
           'html.office-floating [data-office-float] {',
-          '--office-float-by: min(calc(100vw / ' + size[0] + 'px), calc(100vh / ' + size[1] + 'px));',
+          '--office-float-by: min(calc(100vw / ' + shown[0] + 'px), calc(100vh / ' + shown[1] + 'px));',
           'right:auto !important; bottom:auto !important; margin:0 !important; box-sizing:border-box !important;',
           'width:' + size[0] + 'px !important; height:' + size[1] + 'px !important;',
           'min-width:0 !important; min-height:0 !important; transform-origin:0 0 !important;',
@@ -1288,6 +1300,25 @@ enum Isolate {
         var video = document.querySelector('[data-office-float]');
         if (video) video.removeAttribute('data-office-float');
         settle(video);
+        reopen();
+      }
+      // Twitch, in its Studio mode, folds its chat away in a page as narrow as
+      // the little window, and opens it again only when asked: back in its
+      // tab, the chat stayed shut. Asked here, if it was open as the video
+      // went out, once the page is the tab's size again.
+      function reopen() {
+        var home = window.__officeFloatHome;
+        if (!home || !home.chat || root.classList.contains('office-floating')) return;
+        if (innerWidth === wide && innerHeight === high) {
+          // Put back by the clock, its tab not in front: once it is.
+          addEventListener('resize', function again() {
+            removeEventListener('resize', again);
+            reopen();
+          });
+          return;
+        }
+        var shut = document.querySelector('.right-column--collapsed [data-a-target="right-column__toggle-collapse-btn"]');
+        if (shut) shut.click();
       }
       // The tab covers the page with a picture of it as it was left, until
       // it is that again (Browser.land). Put back, the page still has the

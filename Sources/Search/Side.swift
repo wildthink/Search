@@ -635,18 +635,21 @@ private struct PinSquare: View {
         .frame(width: scale * 16 / 34, height: scale * 16 / 34)
         .frame(width: width, height: height)
         .background {
-            if live {
-                // Darker than the resting squares' grey by as much as a live
-                // row is darker than the white it sits on (Drice: the live
-                // pin barely showed among the others).
-                RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)
-                    .fill(greys.pinLive)
-                    .matchedGeometryEffect(id: "live", in: pill)
-            } else {
-                RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)
-                    .fill(browser.selectedTabIDs.contains(tab.id) ? greys.wash :
-                          hovering ? greys.hover : greys.tile)
+            Group {
+                if live {
+                    // Darker than the resting squares' grey by as much as a live
+                    // row is darker than the white it sits on (Drice: the live
+                    // pin barely showed among the others).
+                    RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)
+                        .fill(greys.pinLive)
+                        .matchedGeometryEffect(id: "live", in: pill)
+                } else {
+                    RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)
+                        .fill(browser.selectedTabIDs.contains(tab.id) ? greys.wash :
+                              hovering ? greys.hover : greys.tile)
+                }
             }
+            .animation(Motion.quick, value: live)
         }
         .overlay {
             if browser.selectedTabIDs.contains(tab.id) {
@@ -655,6 +658,14 @@ private struct PinSquare: View {
                     .allowsHitTesting(false)
             }
         }
+        .overlay(alignment: .topTrailing) {
+            // The peek opened from it, while it is up.
+            if browser.peekFrom == tab.id, let page = browser.peekTab {
+                PeekBadge(page: page, size: scale * 16 / 34)
+                    .offset(x: scale * 4 / 34, y: -scale * 4 / 34)
+            }
+        }
+        .animation(Motion.quick, value: browser.peekFrom)
         .contentShape(RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous))
         .modifier(TabPress(enabled: browser.editingPin != tab.id, active: live, selected: $selectedOnPress) {
             browser.clearTabSelection()
@@ -700,6 +711,9 @@ private struct SideRow: View {
     /// The speaker, which can be pressed, and so steps in beside the cross
     /// under the pointer rather than hiding beneath it as the ring does.
     private var speaker: Bool { !tab.loading && (tab.noisy || tab.muted) }
+    /// A pinned row with a peek opened from it: the peek's icon at its end,
+    /// as on a square's corner.
+    private var peeking: Bool { !editing && tab.pin != nil && browser.peekFrom == tab.id && browser.peekTab != nil }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -729,6 +743,8 @@ private struct SideRow: View {
                             .foregroundStyle(colour.opacity(0.8))
                             .help("Recording")
                     }
+                    // A window the page asked for was refused (BlockedPopups).
+                    PopupSign(browser: browser, tab: tab, colour: colour)
                     Text(tab.label)
                         .font(.system(size: prefs.sideTitle))
                         .lineLimit(1)
@@ -738,7 +754,7 @@ private struct SideRow: View {
                 Spacer(minLength: 0)
             }
             .padding(.leading, 10)
-            .padding(.trailing, status ? 0 : 10)
+            .padding(.trailing, status || peeking ? 0 : 10)
             .frame(height: prefs.sideRow)
             .contentShape(Rectangle())
             .modifier(TabPress(enabled: interactive && !editing, active: live, selected: $selectedOnPress) {
@@ -746,6 +762,12 @@ private struct SideRow: View {
                 browser.select(tab)
             })
 
+            if peeking, let page = browser.peekTab {
+                // Under the pointer the cross takes its place, unless the
+                // ring or the speaker already holds the end of the row.
+                PeekBadge(page: page, size: 16)
+                    .opacity(hovering && !status ? 0 : 1)
+            }
             if status {
                 ZStack {
                     if tab.loading {
@@ -761,7 +783,7 @@ private struct SideRow: View {
                 .padding(.trailing, hovering && speaker ? 23 : 0)
             }
         }
-        .padding(.trailing, status ? 7 : 0)
+        .padding(.trailing, status || peeking ? 7 : 0)
         .frame(height: prefs.sideRow)
         .frame(maxWidth: .infinity, alignment: .leading)
         // The title keeps its length under the pointer and fades out
@@ -804,7 +826,9 @@ private struct SideRow: View {
         }
         .animation(Motion.quick, value: tab.loading)
         .animation(Motion.quick, value: speaker)
-        .background { ground }
+        .animation(Motion.quick, value: tab.blockedPopups.isEmpty)
+        .animation(Motion.quick, value: peeking)
+        .background { ground.animation(Motion.quick, value: live) }
         .overlay {
             if browser.selectedTabIDs.contains(tab.id) {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)

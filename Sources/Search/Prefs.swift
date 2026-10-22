@@ -172,6 +172,12 @@ final class Preferences: ObservableObject {
     @Published var awakeSites: Set<String> {
         didSet { store.set(Array(awakeSites).sorted(), forKey: "tabs.awakeSites") }
     }
+    /// Sites whose pages may open windows without a click just before
+    /// (BlockedPopups.swift), each a registrable domain. Empty until you
+    /// choose Always Allow on one; Settings › Privacy lists them.
+    @Published var popupSites: Set<String> {
+        didSet { store.set(Array(popupSites).sorted(), forKey: "privacy.popupSites") }
+    }
     /// Tabs nobody has looked at for half an hour give their page back and
     /// keep where they were. On unless turned off.
     @Published var sleepsTabs: Bool {
@@ -220,6 +226,12 @@ final class Preferences: ObservableObject {
     @Published var searchesSites: Bool {
         didSet { store.set(searchesSites, forKey: "search.sites") }
     }
+    /// Suggestions from the search engine under the address field, as you
+    /// type (see EngineSuggest.swift). Off unless asked for: what is typed
+    /// is sent to the engine while it is typed.
+    @Published var engineSuggests: Bool {
+        didSet { store.set(engineSuggests, forKey: "search.suggest") }
+    }
     @Published var showsReading: Bool {
         didSet { store.set(showsReading, forKey: "tabs.reading") }
     }
@@ -235,12 +247,6 @@ final class Preferences: ObservableObject {
             store.set(keepsSignIns, forKey: "sites.keep")
             Store.keepsSignIns = keepsSignIns
         }
-    }
-    /// A private tab gets extensions too, not just every other page. Off
-    /// unless asked for - a private tab keeps nothing by default, extensions
-    /// included, and some watch what a page does.
-    @Published var extensionsInPrivate: Bool {
-        didSet { store.set(extensionsInPrivate, forKey: "extensions.private") }
     }
     /// Whether sites may ask for a passkey here. Off sends them to the
     /// password instead — the only thing that works in a build without
@@ -331,6 +337,12 @@ final class Preferences: ObservableObject {
     /// Open a clicked link over the page (see Peek.swift). On unless turned off.
     @Published var peeksLinks: Bool {
         didSet { store.set(peeksLinks, forKey: "links.peek") }
+    }
+    /// Pins as in Arc: a link from a pinned tab to another site opens in a
+    /// peek, so the pin stays on its page (see Peek.swift), and ⌘W takes it
+    /// back to the page it was pinned at. Off unless asked for.
+    @Published var pinsPeek: Bool {
+        didSet { store.set(pinsPeek, forKey: "pins.peek") }
     }
     /// A link from another app opens in a small window of its own (see
     /// Little.swift). Off unless asked for.
@@ -525,6 +537,7 @@ final class Preferences: ObservableObject {
             .flatMap { try? JSONDecoder().decode([Keyword].self, from: $0) } ?? []
         keepsSitesAwake = store.bool(forKey: "tabs.keepAwake")
         awakeSites = Set(store.stringArray(forKey: "tabs.awakeSites") ?? [])
+        popupSites = Set(store.stringArray(forKey: "privacy.popupSites") ?? [])
         sleepsTabs = store.object(forKey: "tabs.sleep") as? Bool ?? true
         tabLife = TabLife(rawValue: store.integer(forKey: "tabs.close.after")) ?? .never
         sleepPace = SleepPace.chosen
@@ -533,6 +546,7 @@ final class Preferences: ObservableObject {
         newTabPlace = store.string(forKey: "tabs.newPlace").flatMap(NewTabPlace.init(rawValue:)) ?? .next
         startsFresh = store.bool(forKey: Preferences.freshKey)
         searchesSites = store.bool(forKey: "search.sites")
+        engineSuggests = store.bool(forKey: "search.suggest")
         siteNotifications = store.object(forKey: "notifications.ask") as? Bool ?? true
         showsReading = store.object(forKey: "tabs.reading") as? Bool ?? true
         shielded = store.object(forKey: "shield") as? Bool ?? true
@@ -541,7 +555,6 @@ final class Preferences: ObservableObject {
         // Before the first page is loaded into the store.
         Store.keepsSignIns = keeps
         Spaces.everyStore.forEach(Store.followCookies)
-        extensionsInPrivate = store.bool(forKey: "extensions.private")
         // Offered by default only in a build that can actually do them —
         // one with Apple's browser entitlement and its profile embedded. A
         // choice made under the other kind of build is not a choice about
@@ -605,6 +618,7 @@ final class Preferences: ObservableObject {
         installsUpdates = store.object(forKey: Updater.installKey) as? Bool ?? true
         peeksLinks = store.object(forKey: "links.peek") as? Bool ?? true
         peekClick = store.string(forKey: "links.peekClick").flatMap(PeekClick.init(rawValue:)) ?? .shift
+        pinsPeek = store.bool(forKey: "pins.peek")
         littleLinks = store.bool(forKey: "links.little")
         bookmarksBar = store.bool(forKey: "bookmarks.bar")
         alwaysShowsDownloads = store.bool(forKey: "downloads.button")

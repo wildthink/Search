@@ -175,6 +175,12 @@ struct Omnibox: View {
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(Palette.muted)
                     }
+                case .suggested:
+                    // The engine's own words: always the glass, so they read
+                    // as searches rather than places.
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Palette.muted)
                 case .open:
                     // Already open: naming it takes you back to it rather than
                     // opening a second copy.
@@ -191,7 +197,7 @@ struct Omnibox: View {
                 }
                 // The row reads as 1.0.4's did, without the www; the key
                 // itself keeps it, for completing and going there.
-                Text(Address.withoutWWW(offer.key))
+                Text(offer.kind == .suggested ? offer.key : Address.withoutWWW(offer.key))
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.ink)
                     .lineLimit(1)

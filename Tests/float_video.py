@@ -42,6 +42,9 @@ VIDEO_CASES = {
     "video-padding-border": "padding:40px;border:20px solid red;box-sizing:content-box;",
     "video-clip": "clip-path:inset(20%);",
     "video-portrait": "",
+    # Twitch's Studio mode: the video as tall as the page, its picture in the
+    # middle between black bars.
+    "video-studio": "height:160%;",
     "video-mask": "mask:linear-gradient(transparent,black);",
 }
 PAGE = """<!doctype html><meta charset=utf-8><title>{name}</title>
@@ -57,9 +60,24 @@ setInterval(function(){{g.fillStyle='hsl('+(n++*7%360)+',70%,50%)';g.fillRect(0,
 var v=document.querySelector('video'); v.srcObject=c.captureStream(25); v.play();
 window.scrollTo(0,500);
 </script>"""
-PROBE = """(function(){var v=document.querySelector('video');var r=v.getBoundingClientRect();
+# Where the picture is, as `contain` fits it inside the video's box: that is
+# what has to fill the view, whatever is around it.
+PROBE = """(function(){var v=document.querySelector('video');var b=v.getBoundingClientRect();
+var f=v.videoWidth&&v.videoHeight?Math.min(b.width/v.videoWidth,b.height/v.videoHeight):0;
+var w=f?v.videoWidth*f:b.width,h=f?v.videoHeight*f:b.height,r={left:b.left+(b.width-w)/2,top:b.top+(b.height-h)/2,width:w,height:h};
 var seen=v.checkVisibility?v.checkVisibility({contentVisibilityAuto:true,opacityProperty:true,visibilityProperty:true}):true;
 return JSON.stringify({x:r.left,y:r.top,w:r.width,h:r.height,iw:innerWidth,ih:innerHeight,seen:seen,fit:getComputedStyle(v).objectFit,playing:!v.paused,clip:getComputedStyle(v).clipPath,mask:getComputedStyle(v).webkitMaskImage})})()"""
+
+# Twitch's chat column, as far as the floating video sees it: Studio mode
+# folds it away in a narrow page and never opens it again by itself.
+CHAT = """<div class="right-column"><div class="right-column__toggle-visibility">
+<button data-a-target="right-column__toggle-collapse-btn">chat</button></div></div>
+<script>
+var column=document.querySelector('.right-column');
+column.querySelector('button').onclick=function(){column.classList.toggle('right-column--collapsed')};
+addEventListener('resize',function(){if(innerWidth<920)column.classList.add('right-column--collapsed')});
+</script>"""
+CHAT_OPEN = "!!document.querySelector('.right-column:not(.right-column--collapsed)')"
 
 
 def main():
@@ -71,6 +89,7 @@ def main():
         if name == "video-portrait":
             page = page.replace("width=320 height=180", "width=180 height=320")
         Path(pages, f"{name}.html").write_text(page)
+    Path(pages, "twitch-chat.html").write_text(PAGE.format(name="twitch-chat", style="", video_style="") + CHAT)
     class Quiet(SimpleHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -95,8 +114,8 @@ def main():
             for width, height in [(1180, 780), (700, 500), (900, 900)]:
                 sv.cmd({"do": "resize", "width": width, "height": height, "steps": 2})
                 p = json.loads(sv.cmd({"do": "eval", "id": tab, "js": PROBE}).get("value"))
-                # As large as it goes whole, in the middle: one way it fills the
-                # view, the other it is centred.
+                # The picture as large as it goes whole, in the middle: one way
+                # it fills the view, the other it is centred.
                 wide = abs(p["x"]) < 1 and abs(p["w"] - p["iw"]) < 1 and abs(2 * p["y"] + p["h"] - p["ih"]) < 2 and p["h"] <= p["ih"] + 1
                 tall = abs(p["y"]) < 1 and abs(p["h"] - p["ih"]) < 1 and abs(2 * p["x"] + p["w"] - p["iw"]) < 2 and p["w"] <= p["iw"] + 1
                 floating = isinstance(said, dict) and said.get("floating") is True
@@ -106,6 +125,22 @@ def main():
             after = sv.cmd({"do": "eval", "id": tab, "js": styling})["value"]
             t.ok(f"{name}: returning restores the player's styles", before == after, after)
             sv.sp("close", id=tab)
+
+        # Back in its tab, Twitch's chat is open again, as it was when the
+        # video went out: put back while the page is still the little
+        # window's size, as land does, and the page then made larger.
+        tab = sv.sp("open", url=f"{base}/twitch-chat.html")["resultID"]
+        sv.cmd({"do": "resize", "width": 1180, "height": 780, "steps": 2})
+        time.sleep(1.5)
+        sv.cmd({"do": "eval", "id": tab, "js": isolate, "world": "search"})
+        sv.cmd({"do": "resize", "width": 700, "height": 500, "steps": 2})
+        shut = sv.cmd({"do": "eval", "id": tab, "js": CHAT_OPEN})["value"]
+        sv.cmd({"do": "eval", "id": tab, "js": restore, "world": "search"})
+        sv.cmd({"do": "resize", "width": 1180, "height": 780, "steps": 2})
+        time.sleep(1.1)
+        opened = sv.cmd({"do": "eval", "id": tab, "js": CHAT_OPEN})["value"]
+        t.ok("twitch-chat: returning opens the chat folded away while floating", shut is False and opened is True, (shut, opened))
+        sv.sp("close", id=tab)
     finally:
         t.done(); sv.finish()
     sys.exit(1 if t.failed else 0)

@@ -301,13 +301,13 @@ final class Bench {
         if surfboard(verb, request, browser: browser, answer) { return }
 
         switch verb {
-        case "tabs", "open", "go", "doc-answer", "close", "wait", "sleep", "pin", "select", "text", "eval", "tap", "click", "type", "submit", "layouts", "openmark":
+        case "tabs", "open", "go", "doc-answer", "close", "wait", "sleep", "pin", "select", "text", "nowplaying", "eval", "tap", "click", "type", "submit", "layouts", "openmark":
             tabCommand(verb, request, browser: browser, answer)
 
         case "towindow", "news", "quit", "windows", "middle", "linkmenu":
             windowCommand(verb, request, browser: browser, answer)
 
-        case "shot", "probe", "press", "key", "resize", "hit", "field", "switcher", "recording", "sitesearch":
+        case "shot", "probe", "press", "key", "resize", "hit", "field", "switcher", "recording", "sitesearch", "suggest":
             probeCommand(verb, request, browser: browser, answer)
 
         case "bookmark", "dropdown", "import", "import-preview", "import-file", "remove-folder", "import-file-start", "import-file-status", "import-file-cancel", "marks", "passwords", "tab-type":
@@ -325,10 +325,10 @@ final class Bench {
         case "picture", "float", "film", "strip", "pdf":
             pictureCommand(verb, request, browser: browser, answer)
 
-        case "update", "consent", "fold", "little", "site", "column", "space", "split", "ui", "sidepanel":
+        case "update", "consent", "fold", "little", "site", "column", "space", "split", "ui", "sidepanel", "popups":
             appCommand(verb, request, browser: browser, answer)
 
-        case "extensions", "ext-add", "ext-folder", "ext-press", "ext-remove", "ext-reload", "ext-page", "ext-popup", "ext-menu", "ext-pin", "ext-shot", "ext-answer", "ext-enable", "capture", "capture-stop":
+        case "extensions", "ext-add", "ext-folder", "ext-press", "ext-remove", "ext-reload", "ext-page", "ext-popup", "ext-menu", "ext-pin", "ext-shot", "ext-answer", "ext-enable", "ext-private", "capture", "capture-stop":
             guard #available(macOS 15.4, *) else {
                 answer(["error": "extensions need macOS 15.4"])
                 return
@@ -337,7 +337,7 @@ final class Bench {
 
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
-                "tabs", "open", "go", "openmark", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "textcheck", "resize", "hit", "film", "float", "window", "pages", "picture", "pdf", "place", "group", "tospace", "field", "bookmark", "marks", "menu", "keyeq", "fill", "pin", "middle", "windows", "quit", "towindow", "news", "pull", "magnify", "wheel", "space", "split", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file", "import-file-start", "import-file-status", "import-file-cancel", "remove-folder", "passwords", "accounts", "find", "answer", "visible", "ai", "notifications",
+                "tabs", "open", "go", "openmark", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "textcheck", "resize", "hit", "film", "float", "window", "pages", "picture", "pdf", "place", "group", "tospace", "field", "bookmark", "marks", "menu", "keyeq", "fill", "pin", "middle", "windows", "quit", "towindow", "news", "pull", "magnify", "wheel", "space", "split", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file", "import-file-start", "import-file-status", "import-file-cancel", "remove-folder", "passwords", "accounts", "find", "answer", "visible", "ai", "notifications", "nowplaying", "popups", "suggest",
             ]])
         }
     }
@@ -481,6 +481,27 @@ final class Bench {
                     answer(["text": text, "truncated": cut, "url": tab.address?.absoluteString ?? "", "title": tab.title])
                 }
             }
+
+        case "nowplaying":
+            // Whether this app is the Mac's Now Playing app, the one the media
+            // keys and AirPods taps go to, as WebKit has it for the tab's
+            // page (#512). WebKit's own tests ask the same way; a test run
+            // only, since it is WebKit's private side.
+            guard Store.testing else { answer(["error": "nowplaying only works on a --test run"]); return }
+            guard let tab = find(request, in: browser) else { answer(missing(request)); return }
+            let ask = NSSelectorFromString("_requestActiveNowPlayingSessionInfo:")
+            guard tab.web.responds(to: ask), let imp = tab.web.method(for: ask) else {
+                answer(["error": "this WebKit has no Now Playing info"]); return
+            }
+            typealias Reply = @convention(block) (ObjCBool, ObjCBool, NSString?, Double, Double, Int) -> Void
+            typealias Ask = @convention(c) (AnyObject, Selector, Reply) -> Void
+            let reply: Reply = { active, registered, title, _, _, _ in
+                MainActor.assumeIsolated {
+                    answer(["active": active.boolValue, "registered": registered.boolValue, "title": (title as String?) ?? "",
+                            "hushing": tab.hushing])
+                }
+            }
+            unsafeBitCast(imp, to: Ask.self)(tab.web, ask, reply)
 
         case "eval":
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
@@ -838,6 +859,7 @@ final class Bench {
             }
             // The column folded away, out for a look, and the lights with it (see Fold.swift).
             out["peek"] = browser.peekTab?.address?.absoluteString ?? ""
+            out["peekFrom"] = browser.peekFrom?.uuidString ?? ""
             out["fetching"] = ["showing": browser.fetches.showing, "fraction": browser.fetches.fraction ?? -1, "done": browser.fetches.done]
             // Where the peek's page sits in the window, from its top-left corner, in points.
             if let web = browser.peekTab?.built, let window = web.window {
@@ -1186,6 +1208,54 @@ final class Bench {
                       let data = rep.representation(using: .png, properties: [:]) else { answer(["error": "no picture"]); return }
                 try? data.write(to: URL(fileURLWithPath: path))
                 answer(state(["saved": path]))
+            default: answer(state())
+            }
+
+        case "suggest":
+            // The engine's suggestions under the field (EngineSuggest.swift):
+            // the rows, how many questions went out, were let go of or were
+            // too slow, and a row taken as a click takes it. Only on a
+            // SEARCH_PROBE run.
+            guard Store.testing else { answer(["error": "suggest only works on a --test run"]); return }
+            func kind(_ offer: Suggestion) -> String {
+                switch offer.kind {
+                case .suggested: "suggested"
+                case .search: "search"
+                case .open: "open"
+                case .visited: "visited"
+                case .known: "known"
+                case .command: "command"
+                }
+            }
+            func state(_ extra: [String: Any] = [:]) -> [String: Any] {
+                var out: [String: Any] = [
+                    "typed": browser.typed, "editing": browser.editing,
+                    "offers": browser.offers.map { [$0.key, kind($0), $0.url.absoluteString] },
+                    "asked": browser.suggester.asked, "cancelled": browser.suggester.cancelled,
+                    "tooSlow": browser.suggester.tooSlow,
+                    "on": browser.prefs.engineSuggests, "shy": browser.active?.shy ?? false,
+                    "address": browser.active?.address?.absoluteString ?? "",
+                    "pending": browser.active?.pending?.absoluteString ?? "",
+                ]
+                out.merge(extra) { _, new in new }
+                return out
+            }
+            if let on = request["on"] as? Bool { browser.prefs.engineSuggests = on }
+            switch request["action"] as? String ?? "state" {
+            case "take":
+                let index = request["index"] as? Int ?? 0
+                guard browser.offers.indices.contains(index) else { answer(state(["error": "no row \(index)"])); return }
+                browser.take(browser.offers[index])
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { answer(state()) }
+            case "walk":
+                browser.walk(request["step"] as? Int ?? 1)
+                answer(state(["picked": browser.picked ?? -1, "completed": browser.completed]))
+            case "go":
+                browser.submit()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { answer(state()) }
+            case "esc": browser.dismiss(); answer(state())
+            case "sendable":
+                answer(["sendable": EngineSuggest.sendable(request["text"] as? String ?? "")])
             default: answer(state())
             }
 
@@ -2660,6 +2730,9 @@ final class Bench {
             guard let window = browser.window ?? Links.window, let frame = window.contentView?.superview,
                   let path = request["path"] as? String, !path.isEmpty
             else { answer(["error": "film needs something to do and a path"]); return }
+            if request["action"] as? String == "select", find(request, in: browser) == nil {
+                answer(missing(request)); return
+            }
             let count = min(60, max(1, request["frames"] as? Int ?? 14))
             let every = min(0.5, max(0.01, request["every"] as? Double ?? 0.03))
             // The column's corner — the lights, the pins, the first rows — is
@@ -2705,6 +2778,7 @@ final class Bench {
             case "peek": browser.peek(true)
             case "unpeek": browser.peek(false)
             case "fold": browser.toggleFold()
+            case "select": if let tab = find(request, in: browser) { browser.select(tab) }
             default: break
             }
 
@@ -3001,6 +3075,8 @@ final class Bench {
             if let on = request["sharedpins"] as? Bool { browser.prefs.sharesPins = on }
             if let on = request["hides"] as? Bool { browser.prefs.sideHides = on }
             if let on = request["cards"] as? Bool { browser.prefs.cards = on }
+            // Settings › Videos wait for a click, moved as its switch moves it.
+            if let on = request["waits"] as? Bool, Store.testing { browser.prefs.waitsForPlay = on }
             if let on = request["folded"] as? Bool { browser.folded = on }
             // The window's own full screen as the chrome sees it, without
             // the window going there: a test run never takes the screen.
@@ -3073,7 +3149,54 @@ final class Bench {
                 answer(state)
             }
 
-        case "extensions", "ext-add", "ext-folder", "ext-press", "ext-remove", "ext-reload", "ext-page", "ext-popup", "ext-menu", "ext-pin", "ext-shot", "ext-answer", "ext-enable", "capture", "capture-stop":
+        case "popups":
+            // The windows a tab's page was refused, as its sign offers them
+            // (BlockedPopups.swift), and the sites allowed. open (newest is
+            // 0), allow and remove do what the sign and Settings › Privacy
+            // do: test runs only, they open tabs and change settings.
+            let action = request["action"] as? String ?? "state"
+            guard Store.testing || ["state", "sites"].contains(action) else {
+                answer(["error": "popups \(action) only works on a --test run"]); return
+            }
+            let sites: () -> [String: Any] = { ["allowed": browser.prefs.popupSites.sorted()] }
+            if action == "sites" { answer(sites()); return }
+            if action == "remove" {
+                guard let site = request["site"] as? String else { answer(["error": "popups remove needs a site"]); return }
+                browser.prefs.popupSites.remove(site)
+                answer(sites()); return
+            }
+            guard let tab = find(request, in: browser) else { answer(missing(request)); return }
+            let state: () -> [String: Any] = {
+                [
+                    "blocked": tab.blockedPopups.map { $0.url?.absoluteString ?? "" },
+                    "openable": tab.blockedPopups.map { BlockedPopups.openable($0.url) != nil },
+                    "sign": !tab.blockedPopups.isEmpty,
+                    "site": BlockedPopups.site(of: tab.pageAddress) ?? "",
+                    "allowed": browser.prefs.popupSites.sorted(),
+                    "tabAllowed": tab.popupSites.sorted(),
+                ]
+            }
+            switch action {
+            case "state": answer(state())
+            case "open":
+                let index = request["index"] as? Int ?? 0
+                let newest = Array(tab.blockedPopups.reversed())
+                guard newest.indices.contains(index) else { answer(["error": "no blocked pop-up \(index)"]); return }
+                let opened = browser.openBlocked(newest[index], from: tab)
+                var reply = state()
+                if let opened {
+                    reply["opened"] = describe(opened)
+                    reply["openedOpener"] = opened.opener?.uuidString ?? ""
+                }
+                answer(reply)
+            case "allow":
+                browser.allowPopups(from: tab)
+                answer(state())
+            default:
+                answer(["error": "popups state|open|allow|remove|sites"])
+            }
+
+        case "extensions", "ext-add", "ext-folder", "ext-press", "ext-remove", "ext-reload", "ext-page", "ext-popup", "ext-menu", "ext-pin", "ext-shot", "ext-answer", "ext-enable", "ext-private", "capture", "capture-stop":
             guard #available(macOS 15.4, *) else {
                 answer(["error": "extensions need macOS 15.4"])
                 return
@@ -3502,10 +3625,10 @@ final class Bench {
         case "extensions":
             answer(["started": extensions.started, "busy": extensions.busy ?? "", "extensions": extensions.installed.map { item -> [String: Any] in
                 let context = extensions.contexts[item.id]
-                let action = context?.action(for: extensions.activeAdapter)
+                let action = context.flatMap { $0.action(for: extensions.activeAdapter(for: $0)) }
                 return [
                     "id": item.id, "name": item.name, "version": item.version, "enabled": item.enabled,
-                    "loaded": context != nil,
+                    "loaded": context != nil, "private": context?.hasAccessToPrivateData ?? false,
                     "base": context?.baseURL.absoluteString ?? "",
                     "errors": (context?.errors ?? []).map { error in
                         let e = error as NSError
@@ -3534,6 +3657,13 @@ final class Bench {
             guard let id = request["id"] as? String else { answer(["error": "ext-enable needs an id"]); return }
             extensions.setEnabled(id, request["on"] as? Bool ?? true)
             answer(["enabled": request["on"] as? Bool ?? true])
+        case "ext-private":
+            guard Store.testing else { answer(["error": "only in a test run"]); return }
+            guard let id = request["id"] as? String, let context = extensions.contexts[id] else {
+                answer(["error": "ext-private needs a loaded extension's id"]); return
+            }
+            extensions.setPrivate(id, request["on"] as? Bool ?? true)
+            answer(["private": context.hasAccessToPrivateData])
         case "capture":
             // Extensions' screen recording: ids given, what is recording, who
             // may, and the last request with its answer.

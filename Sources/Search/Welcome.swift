@@ -199,6 +199,7 @@ struct WelcomePanel: View {
                 Key("⌃1", "Spaces: separate tabs and sign-ins. Turn them on in Settings › Tabs.")
                 Key("⌥⌘N", "Split a page in two; ⌃⌘← and ⌃⌘→ go from one page to the other. Turn Split View on in Settings › Tabs.")
                 Key("⌘O", "Links from other apps can open in a small window. Settings › General.")
+                Key("⌘L", "Suggestions from your search engine as you type — off until you turn them on in Settings › General.")
                 if AI.shipped {
                     Key("⌘,", "AI summaries and questions about a page — off until you turn it on in Settings › AI.")
                 }

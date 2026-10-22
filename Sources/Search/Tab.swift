@@ -28,7 +28,7 @@ enum Web {
     /// opened by a link inherits its opener's configuration, handlers
     /// included, and registering a name twice is a hard crash.
     @MainActor static func release(_ controller: WKUserContentController) {
-        for name in [ScrollRelay.name, VeilRelay.name, FormRelay.name, ImageRelay.name,
+        for name in [ScrollRelay.name, VeilRelay.name, FormRelay.name, ImageRelay.name, MediaKeys.name,
                      StoreRelay.name, PasskeyRelay.name, MiddleRelay.name, IconRelay.name, PopupGestureRelay.name, DuskRelay.name] {
             controller.removeScriptMessageHandler(forName: name, contentWorld: world)
             controller.removeScriptMessageHandler(forName: name, contentWorld: .page)
@@ -93,10 +93,13 @@ enum Web {
         // A test run's pretend camera and microphone (see ExtensionCapture).
         if #available(macOS 15.4, *), Store.testing { ExtensionCapture.mockDevices(config.preferences) }
         // Chrome extensions see every page but a private one, unless Settings
-        // › Extensions says they may. The controller has to be there when the
-        // view is made; it can't be added after.
-        if #available(macOS 15.4, *), !shy || Store.settings.bool(forKey: "extensions.private") {
-            MainActor.assumeIsolated { Extensions.attach(config) }
+        // › Extensions lets one in, and WebKit then lets in only that one.
+        // The controller has to be there when the view is made; it can't be
+        // added after.
+        if #available(macOS 15.4, *) {
+            MainActor.assumeIsolated {
+                if !shy || Extensions.shared.contexts.values.contains(where: \.hasAccessToPrivateData) { Extensions.attach(config) }
+            }
         }
         // Left alone, WKWebView says only "AppleWebKit … (KHTML, like Gecko)" —
         // no browser, no version. Google reads that as something it doesn't
@@ -192,14 +195,30 @@ enum Autoplay {
         }
     }
 
-    /// For a page about to load at `url`: allowed to play, or left alone.
-    static func apply(to preferences: WKWebpagePreferences, for url: URL, shy: Bool) {
-        guard !shy, let host = url.host(), allowed(host),
-              !Store.settings.bool(forKey: Preferences.waitsKey) else { return }
+    /// For a page about to load at `url`, in a view made with `made`:
+    /// allowed to play, held to what Settings › Videos wait for a click says
+    /// now, or left alone. WebKit fixes `made` when the view is made, so a
+    /// tab open before the switch moved — and a link opened from it, with a
+    /// copy of its configuration — kept the old answer until it slept: with
+    /// the switch off again, its videos still waited for a click. The page's
+    /// own policy says what the switch says instead, from its next load.
+    static func apply(to preferences: WKWebpagePreferences, for url: URL, shy: Bool,
+                      made: WKAudiovisualMediaTypes) {
+        let waits = Store.settings.bool(forKey: Preferences.waitsKey)
+        let policy: Int
+        if !waits, !shy, let host = url.host(), allowed(host) {
+            policy = 1
+        } else if waits, !made.contains(.video) {
+            policy = 3
+        } else if !waits, made.contains(.video) {
+            policy = 2
+        } else {
+            return
+        }
         let set = NSSelectorFromString("_setAutoplayPolicy:")
         guard preferences.responds(to: set) else { return }
         typealias Setter = @convention(c) (AnyObject, Selector, Int) -> Void
-        unsafeBitCast(preferences.method(for: set), to: Setter.self)(preferences, set, 1)
+        unsafeBitCast(preferences.method(for: set), to: Setter.self)(preferences, set, policy)
     }
 }
 
@@ -311,10 +330,16 @@ final class Tab: ObservableObject, Identifiable {
     /// connection, and which passwords a sign-in box is offered, go by this
     /// one, set when the new page has arrived.
     @Published private(set) var committed: URL?
+    /// The view has drawn its first frame; until then the peek shows its
+    /// skeleton (see PeekSkeleton). True from the start on a WebKit that
+    /// doesn't say when.
+    @Published private(set) var painted = false
     var pageAddress: URL? { committed ?? address }
 
     func didCommit() {
         popupGesture.clear()
+        // What the old page was refused went with it.
+        if !blockedPopups.isEmpty { blockedPopups = [] }
         // A new document: whatever the old one waited for under its field
         // went with it.
         if let built { Passkeys.shared.forget(built) }
@@ -555,11 +580,24 @@ final class Tab: ObservableObject, Identifiable {
     private let veils_ = VeilRelay()
     private let forms = FormRelay()
     private let images = ImageRelay()
+    private let media = MediaKeys()
+    /// Counting down once the page's sound stops, to give the media keys
+    /// back (see MediaKeys.swift). One at most.
+    private var quiet: Timer?
+    /// For the bench.
+    var hushing: Bool { quiet != nil }
     private let shop = StoreRelay()
     private let iconChanges = IconRelay()
     private let middles = MiddleRelay()
     private let dusk = DuskRelay()
     var popupGesture = PopupGesture()
+    /// Windows this page asked for and was refused, newest last, a few at
+    /// most: the quiet sign beside its title offers them (BlockedPopups.swift).
+    /// Gone with the page.
+    @Published var blockedPopups: [BlockedPopup] = []
+    /// A private tab's own Always Allow: only for as long as the tab, never
+    /// written anywhere, as its Keep This Site Awake.
+    var popupSites: Set<String> = []
     private let passkeyRelay = PasskeyRelay()
     private let hovered = HoveredLink()
     private let ears = AudioWatch()
@@ -605,6 +643,10 @@ final class Tab: ObservableObject, Identifiable {
     /// For a pin, one every space shows (see Pins.shared). Set when the row
     /// is built; pins.json, not the session, says which pins these are.
     var everywhere = false
+    /// For a pin, the site a link from it was just peeked at, and when: the
+    /// page's own script sending the pin there after all is turned away
+    /// (see Browser.peek).
+    var peeked: (site: String, at: Date)?
     /// For a pin, kept as a row under the squares rather than as a square:
     /// Arc's pinned list, below its favourites. Still a pin in every other
     /// way: put down by ⌘W, the same in every window, never in a group.
@@ -714,7 +756,9 @@ final class Tab: ObservableObject, Identifiable {
             guard let self else { return }
             self.onSearch?(self, text)
         }
+        web.onFirstFrame = { [weak self] in self?.painted = true }
         web.holdForFirstFrame()
+        painted = !web.unpainted
         // Pages follow the appearance of the window they are drawn in, and the
         // window follows Settings › Appearance — so a site that honours
         // prefers-color-scheme goes dark with the frame, and not otherwise.
@@ -737,6 +781,7 @@ final class Tab: ObservableObject, Identifiable {
         controller.add(relay, contentWorld: Web.world, name: ScrollRelay.name)
         controller.add(veils_, contentWorld: Web.world, name: VeilRelay.name)
         controller.add(images, contentWorld: Web.world, name: ImageRelay.name)
+        controller.add(media, contentWorld: Web.world, name: MediaKeys.name)
         controller.add(shop, contentWorld: Web.world, name: StoreRelay.name)
         controller.add(iconChanges, contentWorld: Web.world, name: IconRelay.name)
         controller.add(forms, contentWorld: Web.world, name: FormRelay.name)
@@ -817,11 +862,12 @@ final class Tab: ObservableObject, Identifiable {
         veils_.tab = self
         forms.tab = self
         images.tab = self
+        media.tab = self
         shop.tab = self
         iconChanges.tab = self
         middles.tab = self
         dusk.tab = self
-        ears.watch(web) { [weak self] on in self?.noisy = on }
+        ears.watch(web) { [weak self] on in self?.heard(on) }
         return web
     }
 
@@ -893,6 +939,11 @@ final class Tab: ObservableObject, Identifiable {
         )
         controller.addUserScript(
             WKUserScript(source: ImageRelay.watch, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
+        )
+        // Every frame, in Search's world: a paused video gives the media keys
+        // back (see MediaKeys.swift).
+        controller.addUserScript(
+            WKUserScript(source: MediaKeys.watch, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
         )
         // The store's "Add to Search" only where Search can add extensions.
         // Before macOS 15.4 it was drawn all the same, and pressing it did
@@ -1279,7 +1330,8 @@ final class Tab: ObservableObject, Identifiable {
 
     /// Settings › Videos wait for a click, changed: the page's next view
     /// is made the new way. One already made keeps what it was made with —
-    /// WebKit fixes it then — until the tab closes or sleeps.
+    /// WebKit fixes it then — and its next page follows through its own
+    /// autoplay policy (see Autoplay.apply).
     func playbackChanged() {
         configuration.mediaTypesRequiringUserActionForPlayback = Web.playback
     }
@@ -1585,14 +1637,49 @@ final class Tab: ObservableObject, Identifiable {
         discard()
     }
 
+    /// The page's sound started or stopped. Stopped, after it had played,
+    /// one timer counts down; started again, or the page gone, it is dropped.
+    private func heard(_ on: Bool) {
+        let was = noisy
+        noisy = on
+        quiet?.invalidate()
+        quiet = nil
+        guard was, !on else { return }
+        quiet = Timer.scheduledTimer(withTimeInterval: MediaKeys.wait, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.hush() }
+        }
+    }
+
+    /// The page is going: its count and its frames with it.
+    func leaving() {
+        quiet?.invalidate()
+        quiet = nil
+        media.forget()
+    }
+
+    /// Quiet long enough: the paused media muted, in the page and in each
+    /// frame that played, so the Mac hands the media keys back.
+    private func hush() {
+        quiet = nil
+        guard !noisy, let built else { return }
+        built.evaluateJavaScript(MediaKeys.hush, in: nil, in: Web.world) { _ in }
+        for frame in media.frames {
+            built.evaluateJavaScript(MediaKeys.hush, in: frame, in: Web.world) { _ in }
+        }
+    }
+
     /// The view and everything listening to it, gone — timers, video,
     /// sockets, and the document WebKit would otherwise keep in its
     /// back-forward cache. The tab keeps its address; `web` builds again the
     /// next time anyone asks for it.
     private func discard() {
         popupGesture.clear()
+        if !blockedPopups.isEmpty { blockedPopups = [] }
         watch = []
         ears.stop()
+        quiet?.invalidate()
+        quiet = nil
+        media.forget()
         guard let web = built else { return }
         built = nil
         Passkeys.shared.forget(web)
@@ -1869,6 +1956,8 @@ final class PageView: WKWebView {
     /// Told the moment the page is reached for — a click, a scroll — so the
     /// picture of a tab waking up never stands between you and the page.
     var onTouch: (() -> Void)?
+    /// The page's first frame is on screen (see showFirstFrame).
+    var onFirstFrame: (() -> Void)?
     /// Told when the keys come to this page, however they got here — a
     /// click, or Tab walked past the other page's last field. With two
     /// pages up it makes this one the focused page (Browser.prepare), which
@@ -1974,6 +2063,7 @@ final class PageView: WKWebView {
     func showFirstFrame() {
         guard unpainted else { return }
         unpainted = false
+        onFirstFrame?()
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.12
             animator().alphaValue = 1

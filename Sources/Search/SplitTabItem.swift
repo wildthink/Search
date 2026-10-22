@@ -124,7 +124,7 @@ private struct SplitTabHalf: View {
             .padding(.trailing, stacked ? 7 : 4)
             .frame(height: stacked ? height : 28)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background { ground }
+            .background { ground.animation(Motion.quick, value: stacked && focused) }
             .frame(height: height)
             .contentShape(Rectangle())
     }
@@ -230,6 +230,9 @@ private struct SplitTabHalf: View {
                     Image(systemName: "eye.slash")
                         .font(.system(size: 9))
                         .foregroundStyle(Palette.muted)
+                }
+                if !narrow {
+                    PopupSign(browser: browser, tab: tab)
                 }
                 // The page is asking something, over its half of the stage.
                 if browser.paneQuestions.contains(where: { $0.tab == tab.id }) {

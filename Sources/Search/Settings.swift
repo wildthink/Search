@@ -208,6 +208,10 @@ struct SettingsPanel: View {
                 .pickerStyle(.menu)
                 .fixedSize()
             }
+            Rule()
+            Line("Suggestions from your search engine", suggestDetail) {
+                Switch(on: $prefs.engineSuggests)
+            }
             if prefs.engine == .custom {
                 ZStack(alignment: .leading) {
                     if prefs.customEngine.isEmpty {
@@ -344,7 +348,7 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.floatFlicks)
             }
             Rule()
-            Line("Videos wait for a click", "Videos don't start by themselves, even without sound; they play when you press play. Tabs already open follow once closed and opened again, or after they've slept") {
+            Line("Videos wait for a click", "Videos don't start by themselves, even without sound; they play when you press play. Tabs already open follow from their next page, or once reloaded") {
                 Switch(on: $prefs.waitsForPlay)
             }
             Rule()
@@ -386,6 +390,15 @@ struct SettingsPanel: View {
             template: current.template.trimmingCharacters(in: .whitespacesAndNewlines)
         ))
         draft = nil
+    }
+
+    /// Said plainly: turned on, what you type leaves the Mac as you type it.
+    private var suggestDetail: String {
+        let name = prefs.engine.name(custom: prefs.customEngine)
+        guard EngineSuggest.endpoint(for: prefs.engine) != nil else {
+            return "Your engine's suggestions under the address field. A custom engine has none to give, so nothing is sent"
+        }
+        return "What you type in the address field is sent to \(name) as you type, and its suggestions show under it. Never from a private tab, and never an address"
     }
 
     private var searchDetail: String {
@@ -533,6 +546,10 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.pinsGoHome)
             }
             Rule()
+            Line("Pins stay on their site", "As in Arc: a link from a pinned tab to another site opens in a panel over it, and the pin stays on its page. Links within the site go as usual, and ⌘W takes the pin back to the page it was pinned at.") {
+                Switch(on: $prefs.pinsPeek)
+            }
+            Rule()
             Line("Split View", "Show two tabs side by side. Drag a tab onto a page to pair them.") {
                 Switch(on: $prefs.splitView)
             }
@@ -659,6 +676,7 @@ struct SettingsPanel: View {
                     Switch(on: $prefs.siteNotifications)
                 }
                 NotificationSites()
+                PopupSiteList(prefs: prefs)
             }
             Card {
                 Line("History", "Every address you have been to") {
