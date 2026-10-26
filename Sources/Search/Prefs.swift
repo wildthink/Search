@@ -138,8 +138,19 @@ final class Preferences: ObservableObject {
     @Published var roomyTabs: Bool {
         didSet { store.set(roomyTabs, forKey: "sidebar.roomy") }
     }
+    /// The column as icons only: each tab its site's mark, no titles, a
+    /// fixed narrow width, and nothing that grows under the pointer (idea
+    /// 413). Off unless asked for; Settings › Appearance › Tabs, Icons only.
+    @Published var sideIcons: Bool {
+        didSet { store.set(sideIcons, forKey: "sidebar.icons") }
+    }
+    /// Whether the column is showing as icons now: down a side, and asked for.
+    var iconColumn: Bool { sidebar && sideIcons }
+    /// The column's width as drawn: fixed with icons only, pulled by its
+    /// edge otherwise (the width pulled is kept for when titles come back).
+    var columnWidth: CGFloat { iconColumn ? Metrics.iconColumn : sideWidth }
     /// One tab's line in the column, and the size its title is set in.
-    var sideRow: CGFloat { roomyTabs ? 36 : 28 }
+    var sideRow: CGFloat { iconColumn ? Metrics.iconTile : roomyTabs ? 36 : 28 }
     var sideTitle: CGFloat { roomyTabs ? 14 : 12.5 }
     /// How wide the column is. Pulled by its edge, and remembered.
     @Published var sideWidth: CGFloat {
@@ -166,11 +177,21 @@ final class Preferences: ObservableObject {
     @Published var keywords: [Keyword] {
         didSet { store.set((try? JSONEncoder().encode(keywords)) ?? Data(), forKey: "search.keywords") }
     }
-    @Published var keepsSitesAwake: Bool {
-        didSet { store.set(keepsSitesAwake, forKey: "tabs.keepAwake") }
+    /// Always on since the Settings rework (Drice, 24 Oct 2026): it only
+    /// adds a command, so there is no switch. Still a property, for the
+    /// code that asks and the tests that turn it off; never written.
+    @Published var keepsSitesAwake = true
+    /// A tab gives a little under the pointer while it is pressed, as Arc's
+    /// do (see Give). Off unless turned on.
+    @Published var tabsGive: Bool {
+        didSet { store.set(tabsGive, forKey: "tabs.give") }
     }
     @Published var awakeSites: Set<String> {
         didSet { store.set(Array(awakeSites).sorted(), forKey: "tabs.awakeSites") }
+    }
+    /// Sized website pop-ups may use small windows instead of tabs (#552).
+    @Published var popupWindows: Bool {
+        didSet { store.set(popupWindows, forKey: "tabs.popupWindows") }
     }
     /// Sites whose pages may open windows without a click just before
     /// (BlockedPopups.swift), each a registrable domain. Empty until you
@@ -221,19 +242,35 @@ final class Preferences: ObservableObject {
         didSet { store.set(startsFresh, forKey: Preferences.freshKey) }
     }
     nonisolated static let freshKey = "start.fresh"
-    /// Search a site from the address field: the start of its name, then
-    /// Tab (see SiteSearch.swift). Off unless asked for.
-    @Published var searchesSites: Bool {
-        didSet { store.set(searchesSites, forKey: "search.sites") }
+    /// Ask before the Quit menu or ⌘Q closes the app. Off unless asked for.
+    @Published var confirmsQuit: Bool {
+        didSet { store.set(confirmsQuit, forKey: Preferences.confirmQuitKey) }
     }
+    nonisolated static let confirmQuitKey = "quit.confirm"
+    /// Search a site from the address field: the start of its name, then
+    /// Tab (see SiteSearch.swift).
+    /// Always on since the Settings rework (Drice, 24 Oct 2026): it only
+    /// adds a command, so there is no switch. Still a property, for the
+    /// code that asks and the tests that turn it off; never written.
+    @Published var searchesSites = true
     /// Suggestions from the search engine under the address field, as you
     /// type (see EngineSuggest.swift). Off unless asked for: what is typed
     /// is sent to the engine while it is typed.
     @Published var engineSuggests: Bool {
         didSet { store.set(engineSuggests, forKey: "search.suggest") }
     }
+    /// Numbers beside tabs while Command is held. Off unless asked for.
+    @Published var showsTabShortcuts: Bool {
+        didSet { store.set(showsTabShortcuts, forKey: "tabs.shortcuts") }
+    }
     @Published var showsReading: Bool {
         didSet { store.set(showsReading, forKey: "tabs.reading") }
+    }
+    /// The tab you're on says where its page is, at rest, without a click:
+    /// its site, from the address on screen (see AtRest.swift). On unless
+    /// turned off.
+    @Published var showsAddress: Bool {
+        didSet { store.set(showsAddress, forKey: "tabs.address") }
     }
     /// The ad blocker. On unless turned off; there is nothing else to it.
     @Published var shielded: Bool {
@@ -246,6 +283,22 @@ final class Preferences: ObservableObject {
         didSet {
             store.set(keepsSignIns, forKey: "sites.keep")
             Store.keepsSignIns = keepsSignIns
+        }
+    }
+    /// Global Privacy Control sent with every request (see Privacy.swift).
+    /// On unless turned off.
+    @Published var sendsPrivacySignal: Bool {
+        didSet {
+            store.set(sendsPrivacySignal, forKey: "privacy.gpc")
+            PrivacySignal.on = sendsPrivacySignal
+        }
+    }
+    /// Ad-click IDs taken off links before the page loads (see
+    /// Privacy.swift). On unless turned off.
+    @Published var removesClickIDs: Bool {
+        didSet {
+            store.set(removesClickIDs, forKey: "privacy.clickIDs")
+            ClickIDs.on = removesClickIDs
         }
     }
     /// Whether sites may ask for a passkey here. Off sends them to the
@@ -281,6 +334,12 @@ final class Preferences: ObservableObject {
     /// Put a kept name and password into a sign-in as soon as one appears.
     @Published var fillsPasswords: Bool {
         didSet { store.set(fillsPasswords, forKey: "passwords.fill") }
+    }
+    /// Accounts from the Mac's Passwords app under the sign-in box too, by
+    /// Apple's helper for its Chrome extension (ApplePasswords.swift). Off
+    /// unless turned on: unofficial, and it pairs with a code.
+    @Published var applePasswords: Bool {
+        didSet { store.set(applePasswords, forKey: "passwords.apple") }
     }
     /// The first launch has been walked through. Until then the welcome
     /// stands over the window.
@@ -323,12 +382,18 @@ final class Preferences: ObservableObject {
         }
     }
     /// Pages draw at 120 frames a second on a screen that can (see FrameRate.swift).
-    /// Never unless asked for.
+    /// On power unless chosen otherwise.
     @Published var fastPages: FastPages {
         didSet {
             store.set(fastPages.rawValue, forKey: "pages.120.mode")
             FrameRate.mode = fastPages
         }
+    }
+    /// Springs become a short ease-out in Low Power Mode (see Motion.light).
+    /// Off unless turned on, and even then nothing changes until the Mac is
+    /// asked to save power.
+    @Published var lightMotion: Bool {
+        didSet { store.set(lightMotion, forKey: Motion.lightKey) }
     }
     /// The modifier chosen in Settings › Shortcuts; Shift-click by default.
     @Published var peekClick: PeekClick {
@@ -340,9 +405,22 @@ final class Preferences: ObservableObject {
     }
     /// Pins as in Arc: a link from a pinned tab to another site opens in a
     /// peek, so the pin stays on its page (see Peek.swift), and ⌘W takes it
-    /// back to the page it was pinned at. Off unless asked for.
+    /// back to the page it was pinned at. Half of "Pins keep their site"
+    /// (Preferences.pinsKeepSite), on unless turned off.
     @Published var pinsPeek: Bool {
         didSet { store.set(pinsPeek, forKey: "pins.peek") }
+    }
+    /// Reading mode shows a site's own markdown copy of the page when it
+    /// publishes one, and works the article out only when it doesn't (see
+    /// Reader.twin). Off unless asked for.
+    @Published var readsTwins: Bool {
+        didSet { store.set(readsTwins, forKey: "reader.twins") }
+    }
+    /// Reading mode goes dark with the window, with a light/dark/window
+    /// switch in its corner (see ReaderLook). Off unless asked for: the
+    /// article is white, as it always was.
+    @Published var readerFollowsLook: Bool {
+        didSet { store.set(readerFollowsLook, forKey: "reader.follows") }
     }
     /// A link from another app opens in a small window of its own (see
     /// Little.swift). Off unless asked for.
@@ -368,7 +446,7 @@ final class Preferences: ObservableObject {
         }
     }
     /// A back or forward swipe held once armed shows the pages that way to
-    /// pick from (see PageView.openList). Off unless asked for.
+    /// pick from (see PageView.openList). On unless turned off.
     @Published var holdsHistory: Bool {
         didSet {
             store.set(holdsHistory, forKey: "swipe.history")
@@ -394,11 +472,46 @@ final class Preferences: ObservableObject {
         didSet { store.set(waitsForPlay, forKey: Preferences.waitsKey) }
     }
     nonisolated static let waitsKey = "media.click"
+    /// Translate Page in the page's right-click menu, on this Mac only
+    /// (Translate.swift).
+    /// Always on since the Settings rework (Drice, 24 Oct 2026): it only
+    /// adds a command, so there is no switch. Still a property, for the
+    /// code that asks and the tests that turn it off; never written.
+    @Published var translatesPages = true
+    /// The languages whose pages are translated as they open, chosen from
+    /// the translated sign's menu (never from a private tab). None at first.
+    @Published var translateAlways: Set<String> {
+        didSet { store.set(Array(translateAlways).sorted(), forKey: PageTranslator.alwaysKey) }
+    }
     /// A video playing on a video site comes out into the floating window
     /// when you go to another tab (Browser.leaving). On, as it always was;
     /// the switch is for turning it off.
     @Published var floatsOnLeave: Bool {
         didSet { store.set(floatsOnLeave, forKey: "float.leave") }
+    }
+    /// Websites in the side panel (SidePanel.swift).
+    /// Always on since the Settings rework (Drice, 24 Oct 2026): it only
+    /// adds a command, so there is no switch. Still a property, for the
+    /// code that asks and the tests that turn it off; never written.
+    @Published var sitesInPanel = true
+    /// The website last put in the side panel, for View › Side Panel.
+    @Published var panelSite: String {
+        didSet { store.set(panelSite, forKey: "panel.site") }
+    }
+    /// Which window a floating video goes into: Search's own, as it always
+    /// was, or macOS's picture in picture (see NativePiP.swift).
+    @Published var floatStyle: FloatStyle {
+        didSet {
+            store.set(floatStyle.rawValue, forKey: "float.style")
+            NativePiP.allowEverywhere()
+        }
+    }
+    /// Escape on a page filling the screen leaves only when pressed twice
+    /// within two seconds, as in Arc; the first puts up a reminder (see
+    /// FullScreenEscape). Off unless asked for: one press leaves, as in
+    /// Safari.
+    @Published var escapeTwice: Bool {
+        didSet { store.set(escapeTwice, forKey: "fullscreen.escapeTwice") }
     }
     /// A newer build is fetched, checked and put in place on its own, as it
     /// always was. Off, Search still looks every hour and says so, and waits
@@ -415,10 +528,11 @@ final class Preferences: ObservableObject {
     @Published var usesSpaces: Bool {
         didSet { store.set(usesSpaces, forKey: "spaces") }
     }
-    /// Named, collapsible sections in the sidebar. Off unless asked for.
-    @Published var usesTabGroups: Bool {
-        didSet { store.set(usesTabGroups, forKey: "tabs.groups") }
-    }
+    /// Named, collapsible sections in the sidebar.
+    /// Always on since the Settings rework (Drice, 24 Oct 2026): it only
+    /// adds a command, so there is no switch. Still a property, for the
+    /// code that asks and the tests that turn it off; never written.
+    @Published var usesTabGroups = true
     /// Arc's three tiers in the sidebar: the squares, pins kept as rows
     /// under them, and a line with Clear above the tabs that come and go
     /// (see Tab.listed). Off unless asked for.
@@ -427,18 +541,26 @@ final class Preferences: ObservableObject {
     }
     /// A pin goes back to the page it was pinned at when it is closed with
     /// ⌘W and when Search opens again, as Arc's pins do, rather than keeping
-    /// wherever it was taken since. Off unless asked for.
+    /// wherever it was taken since. The other half of "Pins keep their
+    /// site", on unless turned off.
     @Published var pinsGoHome: Bool {
         didSet { store.set(pinsGoHome, forKey: "pins.home") }
     }
+    /// A pin's ⌘ number pressed again, on that pin, goes back to the tab
+    /// you were on before it.
+    /// Always on since the Settings rework (Drice, 24 Oct 2026): it only
+    /// adds a command, so there is no switch. Still a property, for the
+    /// code that asks and the tests that turn it off; never written.
+    @Published var pinNumberGoesBack = true
     /// Whether the pinned rows are drawn as rows: asked for, and with the
     /// tabs down the side. Across the top every pin is a square.
     var showsPinRows: Bool { listsPins && sidebar }
     /// Pins every space shows above its own, as Arc's favourites sit above
-    /// every space (see Pins.shared). Off unless asked for.
-    @Published var sharesPins: Bool {
-        didSet { store.set(sharesPins, forKey: "pins.shared") }
-    }
+    /// every space (see Pins.shared).
+    /// Always on since the Settings rework (Drice, 24 Oct 2026): it only
+    /// adds a command, so there is no switch. Still a property, for the
+    /// code that asks and the tests that turn it off; never written.
+    @Published var sharesPins = true
     /// Whether the shared pins are in the rows: asked for, and with Spaces
     /// on. Off, they wait in pins.json for the switch to come back.
     var showsSharedPins: Bool { sharesPins && usesSpaces }
@@ -476,16 +598,17 @@ final class Preferences: ObservableObject {
         aiModels[provider.rawValue] = name
     }
 
-    /// Two pages share one place in the tab row. Off unless asked for.
-    @Published var splitView: Bool {
-        didSet { store.set(splitView, forKey: "splitView") }
-    }
+    /// Two pages share one place in the tab row.
+    /// Always on since the Settings rework (Drice, 24 Oct 2026): it only
+    /// adds a command, so there is no switch. Still a property, for the
+    /// code that asks and the tests that turn it off; never written.
+    @Published var splitView = true
     /// ⌃W, ⌃R, ⌃M and ⌃O on the ⌃Tab switcher's card picked, with the keys
-    /// listed under the tabs (see TabSwitcher.Action). Off unless asked for:
-    /// the switcher everyone uses stays as it was.
-    @Published var switcherKeys: Bool {
-        didSet { store.set(switcherKeys, forKey: "switcher.keys") }
-    }
+    /// listed under the tabs (see TabSwitcher.Action).
+    /// Always on since the Settings rework (Drice, 24 Oct 2026): it only
+    /// adds a command, so there is no switch. Still a property, for the
+    /// code that asks and the tests that turn it off; never written.
+    @Published var switcherKeys = true
     /// "settings", "new tab" and the like, typed alone in the address field,
     /// reach that part of the app instead of asking a search engine for the
     /// word (see AddressCommands.swift). Off unless asked for.
@@ -527,6 +650,7 @@ final class Preferences: ObservableObject {
         sidePosition = store.string(forKey: "sidebar.position").flatMap(SidebarPosition.init) ?? .left
         sideHides = store.bool(forKey: "sidebar.hides")
         roomyTabs = store.bool(forKey: "sidebar.roomy")
+        sideIcons = store.bool(forKey: "sidebar.icons")
         let width = store.object(forKey: "sidebar.width") as? Double ?? Double(Metrics.side)
         sideWidth = min(Metrics.sideMax, max(Metrics.sideMin, CGFloat(width)))
         cards = store.object(forKey: "layout.cards") as? Bool ?? true
@@ -535,8 +659,9 @@ final class Preferences: ObservableObject {
         customEngine = store.string(forKey: "search.custom") ?? ""
         keywords = store.data(forKey: "search.keywords")
             .flatMap { try? JSONDecoder().decode([Keyword].self, from: $0) } ?? []
-        keepsSitesAwake = store.bool(forKey: "tabs.keepAwake")
+        tabsGive = store.bool(forKey: "tabs.give")
         awakeSites = Set(store.stringArray(forKey: "tabs.awakeSites") ?? [])
+        popupWindows = store.bool(forKey: "tabs.popupWindows")
         popupSites = Set(store.stringArray(forKey: "privacy.popupSites") ?? [])
         sleepsTabs = store.object(forKey: "tabs.sleep") as? Bool ?? true
         tabLife = TabLife(rawValue: store.integer(forKey: "tabs.close.after")) ?? .never
@@ -545,16 +670,26 @@ final class Preferences: ObservableObject {
         newTabAfterLast = store.bool(forKey: "tabs.newAfterLast")
         newTabPlace = store.string(forKey: "tabs.newPlace").flatMap(NewTabPlace.init(rawValue:)) ?? .next
         startsFresh = store.bool(forKey: Preferences.freshKey)
-        searchesSites = store.bool(forKey: "search.sites")
+        confirmsQuit = store.bool(forKey: Preferences.confirmQuitKey)
         engineSuggests = store.bool(forKey: "search.suggest")
         siteNotifications = store.object(forKey: "notifications.ask") as? Bool ?? true
+        showsTabShortcuts = store.bool(forKey: "tabs.shortcuts")
         showsReading = store.object(forKey: "tabs.reading") as? Bool ?? true
+        // On for everyone who never touched it (Drice, 24 Oct 2026, on
+        // Security's advice); a choice made before stands.
+        showsAddress = store.object(forKey: "tabs.address") as? Bool ?? true
         shielded = store.object(forKey: "shield") as? Bool ?? true
         let keeps = store.bool(forKey: "sites.keep")
         keepsSignIns = keeps
         // Before the first page is loaded into the store.
         Store.keepsSignIns = keeps
         Spaces.everyStore.forEach(Store.followCookies)
+        let signals = store.object(forKey: "privacy.gpc") as? Bool ?? true
+        sendsPrivacySignal = signals
+        PrivacySignal.on = signals
+        let removes = store.object(forKey: "privacy.clickIDs") as? Bool ?? true
+        removesClickIDs = removes
+        ClickIDs.on = removes
         // Offered by default only in a build that can actually do them —
         // one with Apple's browser entitlement and its profile embedded. A
         // choice made under the other kind of build is not a choice about
@@ -589,22 +724,27 @@ final class Preferences: ObservableObject {
         asksWhereToSave = store.bool(forKey: "downloads.ask")
         savesPasswords = store.object(forKey: "passwords.save") as? Bool ?? true
         fillsPasswords = store.object(forKey: "passwords.fill") as? Bool ?? true
+        applePasswords = store.bool(forKey: "passwords.apple")
         // Anyone who already has a session was here before the welcome
         // existed; they are not asked to sit through it.
         welcomed = store.bool(forKey: "welcomed") || store.object(forKey: "glyph") != nil
         usesSpaces = store.bool(forKey: "spaces")
-        usesTabGroups = store.bool(forKey: "tabs.groups")
         listsPins = store.bool(forKey: "pins.list")
-        pinsGoHome = store.bool(forKey: "pins.home")
-        sharesPins = store.bool(forKey: "pins.shared")
-        splitView = store.bool(forKey: "splitView")
-        switcherKeys = store.bool(forKey: "switcher.keys")
+        // "Pins keep their site" is one switch over two keys (see
+        // SettingsIndex): on when either was on, on by default when neither
+        // was ever touched (Drice, 24 Oct 2026), off when one was turned
+        // off and the other never set. Nothing is written here.
+        let home = store.object(forKey: "pins.home") as? Bool
+        let peek = store.object(forKey: "pins.peek") as? Bool
+        let keepsSite = home == nil && peek == nil ? true : (home ?? false) || (peek ?? false)
+        pinsGoHome = keepsSite
         ai = AI.shipped && store.bool(forKey: "ai")
         aiProvider = store.string(forKey: "ai.provider").flatMap(AIProvider.init(rawValue:))
         aiModels = store.dictionary(forKey: "ai.models") as? [String: String] ?? [:]
         commandBar = store.bool(forKey: "commandbar")
         floatingNewTab = store.bool(forKey: "newtab.floating")
-        let history = store.bool(forKey: "swipe.history")
+        // On for everyone who never touched it (24 Oct 2026).
+        let history = store.object(forKey: "swipe.history") as? Bool ?? true
         holdsHistory = history
         PageView.holdsHistory = history
         // On for everyone who never touched these three switches (Drice,
@@ -614,11 +754,17 @@ final class Preferences: ObservableObject {
         Float.flicks = flicks
         floatsAway = store.bool(forKey: "float.away")
         floatsOnLeave = store.object(forKey: "float.leave") as? Bool ?? true
+        panelSite = store.string(forKey: "panel.site") ?? ""
+        floatStyle = store.string(forKey: "float.style").flatMap(FloatStyle.init(rawValue:)) ?? .search
+        escapeTwice = store.bool(forKey: "fullscreen.escapeTwice")
         waitsForPlay = store.bool(forKey: Preferences.waitsKey)
+        translateAlways = Set(store.stringArray(forKey: PageTranslator.alwaysKey) ?? [])
         installsUpdates = store.object(forKey: Updater.installKey) as? Bool ?? true
         peeksLinks = store.object(forKey: "links.peek") as? Bool ?? true
         peekClick = store.string(forKey: "links.peekClick").flatMap(PeekClick.init(rawValue:)) ?? .shift
-        pinsPeek = store.bool(forKey: "pins.peek")
+        pinsPeek = keepsSite
+        readsTwins = store.bool(forKey: "reader.twins")
+        readerFollowsLook = store.bool(forKey: "reader.follows")
         littleLinks = store.bool(forKey: "links.little")
         bookmarksBar = store.bool(forKey: "bookmarks.bar")
         alwaysShowsDownloads = store.bool(forKey: "downloads.button")
@@ -631,11 +777,15 @@ final class Preferences: ObservableObject {
         let scrolls = store.bool(forKey: "autoscroll")
         autoScroll = scrolls
         AutoScroll.on = scrolls
-        // "pages.120" was a switch before it was three choices: on is now always.
+        // "pages.120" was a switch before it was three choices: on is now
+        // always, an explicit off never. Never touched: On power (24 Oct
+        // 2026), which changes nothing on battery.
         let fast = store.string(forKey: "pages.120.mode").flatMap(FastPages.init)
-            ?? (store.bool(forKey: "pages.120") ? .always : .never)
+            ?? (store.object(forKey: "pages.120") as? Bool).map { $0 ? FastPages.always : .never }
+            ?? .onPower
         fastPages = fast
         FrameRate.mode = fast
+        lightMotion = store.bool(forKey: Motion.lightKey)
         // Left behind by the Web Inspector's switch, from before it was
         // always there.
         store.removeObject(forKey: "inspector")

@@ -195,11 +195,20 @@ struct WelcomePanel: View {
                     .padding(.top, 6)
                 Key("⌘T", "A new tab. Type a place, or words to search.")
                 Key("⌘K", "Every open tab, by name.")
-                Key("⌘,", "Settings, including passwords and updates.")
-                Key("⌃1", "Spaces: separate tabs and sign-ins. Turn them on in Settings › Tabs.")
-                Key("⌥⌘N", "Split a page in two; ⌃⌘← and ⌃⌘→ go from one page to the other. Turn Split View on in Settings › Tabs.")
-                Key("⌘O", "Links from other apps can open in a small window. Settings › General.")
-                Key("⌘L", "Suggestions from your search engine as you type — off until you turn them on in Settings › General.")
+                Key("⌘,", "Settings, including passwords and updates. ⌘F there finds any setting.")
+                Key("⌃1", "Spaces: separate tabs and sign-ins. Turn them on in Settings › Spaces & Pins, or Set Up Like Arc there.")
+                Key("⌥⌘N", "Split a page in two, or drag a tab onto a page; ⌃⌘← and ⌃⌘→ go from one page to the other.")
+                Key("⌘O", "Links from other apps can open in a small window. Settings › Browsing.")
+                Key("⌘L", "Suggestions from your search engine as you type — off until you turn them on in Settings › Browsing.")
+                Key("⌘", "Held, it can show each tab's number for ⌘1–9. Settings › Tabs.")
+                Key("⌘1", "Pressed again on its pin, back to where you were.")
+                Key("⇧⌘P", "Float a video in Search's window, or in macOS's picture in picture. Settings › Browsing.")
+                Key("⌃-click", "Claude or ChatGPT in a side panel beside the page: right-click a tab › Open in Side Panel, or View › Side Panel.")
+                Key("⌘Q", "Search can ask before it quits. Settings › General.")
+                Key("⌘,", "Your Apple passwords, under the sign-in field — Settings › Passwords.")
+                if PageTranslator.available {
+                    Key("⌃-click", "Translate a page into your language, on this Mac — nothing is sent anywhere. Right-click the page › Translate Page.")
+                }
                 if AI.shipped {
                     Key("⌘,", "AI summaries and questions about a page — off until you turn it on in Settings › AI.")
                 }
@@ -258,7 +267,7 @@ struct WelcomePanel: View {
                     case .success(let found):
                         let kept = browser.keep(found)
                         ImportRecords.note(source.name, passwords: kept)
-                        lines.append("\(kept) passwords")
+                        lines.append("\(kept) passwords" + (found.undecrypted > 0 ? " (\(found.undecrypted) couldn't be decrypted)" : ""))
                     case .failure(Chromium.Trouble.noPassphrase):
                         lines.append("passwords: macOS didn't hand over the key — allow it and try again")
                     case .failure(Mozilla.Trouble.primaryPassword):

@@ -32,7 +32,6 @@ struct ExtensionsPage: View {
                                 .foregroundStyle(Palette.ink)
                             Spacer(minLength: 8)
                             Pill("Open the Store") {
-                                browser.tuning = false
                                 browser.open(Browser.webStore, foreground: true)
                             }
                         }
@@ -69,9 +68,8 @@ struct ExtensionsPage: View {
                 Card {
                     Line("From another browser", "What Chrome, Arc, Brave and the others added from the Chrome Web Store — installed fresh from the store, you say yes to each one") {
                         Pill("Bring them over…") {
-                            browser.tuning = false
                             browser.bringingExtensions = true
-                            browser.bringingIn = ""
+                            browser.lead(to: InternalPage(.importing))
                         }
                     }
                 }
@@ -295,7 +293,7 @@ struct StoreOffer: View {
     }
 }
 
-/// Settings › General › Home page: what a new tab opens to, while an
+/// Settings › Browsing › Searching › Home page: what a new tab opens to, while an
 /// extension offers a page for it. Search's own page with the address field
 /// ready, or the page of an extension that asked to take its place, and
 /// the way back from one that did. With nothing offered there is nothing to
@@ -315,7 +313,8 @@ struct HomePageLine: View {
             let askers = extensions.newTabAskers
             let current = extensions.newTabPageID
             if !askers.isEmpty {
-                Line("Home page", detail(askers, current)) {
+                Rule(inset: SettingsPanel.textInset)
+                SettingRow(icon: "house", title: "Home page", detail: detail(askers, current)) {
                     Picker("", selection: Binding(
                         get: { current ?? "" },
                         set: { extensions.setNewTabPage($0.isEmpty ? nil : $0) }
@@ -328,7 +327,6 @@ struct HomePageLine: View {
                     .pickerStyle(.menu)
                     .fixedSize()
                 }
-                Rule()
             }
         }
 

@@ -226,6 +226,65 @@ final class SidebarPressTests: XCTestCase {
         XCTAssertNil(browser.editingPin)
     }
 
+    /// The press that selects (TabPress) held the drag back until the
+    /// release: nothing moved under the hand, the row jumped on letting go,
+    /// and a pin held still a moment before letting go wasn't moved at all.
+    func testRowsAndPinsMoveWhileTheButtonIsDown() async throws {
+        for kind in ["row", "pin"] {
+            let browser = makeBrowser()
+            let tabs = browser.tabs
+            if kind == "pin" { browser.pin(tabs[0]); browser.pin(tabs[1]) }
+            let window = makeWindow(browser)
+            try await settle()
+            let before = browser.tabs.map(\.id)
+            let start = kind == "pin" ? NSPoint(x: 40, y: window.frame.height - Metrics.strip - 17) : rowPoint(0, in: window)
+            try await send(.leftMouseDown, at: start, in: window)
+            var last = start
+            for distance in [8.0, 20, 40, 60, 80] {
+                last = kind == "pin" ? NSPoint(x: start.x + distance, y: start.y) : NSPoint(x: start.x, y: start.y - distance * 0.8)
+                try await send(.leftMouseDragged, at: last, in: window)
+            }
+            try await Task.sleep(for: .milliseconds(100))
+            XCTAssertNotEqual(browser.tabs.map(\.id), before, "\(kind): moved while the button is still down")
+            // Held still a little, then let go (not long: a window off the
+            // screen gets no real button, and a pin's tooltip ends the drag).
+            try await Task.sleep(for: .milliseconds(150))
+            try await send(.leftMouseUp, at: last, in: window)
+            try await settle()
+            XCTAssertNotEqual(browser.tabs.map(\.id), before, "\(kind): still moved once let go")
+            XCTAssertNil(browser.editingTab)
+            XCTAssertNil(browser.editingPin)
+            for tab in browser.tabs where tab.pin != nil { browser.unpin(tab) }
+        }
+    }
+
+    func testStripPillStillSelectsOnClick() async throws {
+        let browser = makeBrowser()
+        browser.prefs.sidebar = false
+        let second = browser.tabs[1]
+        let window = makeStripWindow(browser)
+        try await settle()
+        try await send(.leftMouseDown, at: pillPoint(1), in: window)
+        try await send(.leftMouseUp, at: pillPoint(1), in: window)
+        XCTAssertEqual(browser.activeID, second.id, "Watching the press for the pill to give must leave its click alone")
+    }
+
+    func testStripPillPressThenDragStillReorders() async throws {
+        let browser = makeBrowser()
+        browser.prefs.sidebar = false
+        let first = browser.tabs[0]
+        let window = makeStripWindow(browser)
+        try await settle()
+        let start = pillPoint(0)
+        try await send(.leftMouseDown, at: start, in: window)
+        for distance in [8.0, 40, 120, 200] {
+            try await send(.leftMouseDragged, at: NSPoint(x: start.x + distance, y: start.y), in: window)
+        }
+        try await send(.leftMouseUp, at: NSPoint(x: start.x + 200, y: start.y), in: window)
+        try await settle()
+        XCTAssertNotEqual(browser.tabs.first?.id, first.id, "A pill carried past the next one still moves")
+    }
+
     private func makeBrowser() -> Browser {
         _ = NSApplication.shared
         activationPolicy = NSApp.activationPolicy()
@@ -261,6 +320,16 @@ final class SidebarPressTests: XCTestCase {
         window.orderFrontRegardless()
         windows.append(window)
         return window
+    }
+
+    private func makeStripWindow(_ browser: Browser) -> NSWindow {
+        makeWindow(root: TabBar(browser: browser), width: 900, height: Metrics.strip)
+    }
+
+    /// The middle of a pill in the 900-point strip of three tabs: each is
+    /// about 180 points wide, the first starting after the window's lights.
+    private func pillPoint(_ index: Int) -> NSPoint {
+        NSPoint(x: 195 + CGFloat(index) * 185, y: Metrics.strip / 2)
     }
 
     private func rowPoint(_ index: Int, in window: NSWindow) -> NSPoint {

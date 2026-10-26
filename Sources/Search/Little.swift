@@ -36,9 +36,16 @@ final class LittleWindow: NSObject, NSWindowDelegate {
         browser.prepare(tab)
         tab.go(to: url)
         let little = LittleWindow(tab: tab, browser: browser)
+        // A step down and in from the newest one on screen, so that five
+        // links from Mail are five windows you can see are there, not one
+        // on top of four.
+        if let last = open.last(where: { $0.window.isVisible }) {
+            little.window.cascadeTopLeft(from: last.window.cascadeTopLeft(from: .zero))
+        } else {
+            little.window.center()
+        }
         open.append(little)
         watchKeys()
-        little.window.center()
         watch()
         // Never a test run's in front: a probe started hidden stays off every screen.
         guard front, !Store.testing else { return }
@@ -121,7 +128,7 @@ final class LittleWindow: NSObject, NSWindowDelegate {
             guard switcher.active, let little = owning(event.window), switcher.home == little.tab.id
             else { return event }
             if event.type == .flagsChanged {
-                if !event.modifierFlags.contains(.control) { commit() }
+                if !ShortcutStore.shared.recentHeld(event.modifierFlags) { commit() }
                 return event
             }
             // As in a browser window (Browser.clickTabSwitcher): ⌃ is held,
@@ -207,7 +214,8 @@ final class LittleWindow: NSObject, NSWindowDelegate {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let key = event.shortcutCharacters
         let switcher = LittleWindow.switcher
-        if event.keyCode == 48, flags.contains(.control), flags.isDisjoint(with: [.command, .option]) {
+        // ⌃Tab, or the key Settings › Shortcuts gave the switcher.
+        if let backwards = ShortcutStore.shared.recentSwitch(event) {
             // A Tab held down doesn't race through them.
             guard !event.isARepeat else { return true }
             if !switcher.active {
@@ -216,14 +224,14 @@ final class LittleWindow: NSObject, NSWindowDelegate {
                 switcher.partners = browser?.switcherPartners ?? [:]
             }
             switcher.step(fromMoon: tab.id, moons: LittleWindow.stacked,
-                          planet: LittleWindow.planet?.switcherPlanet ?? [], backwards: flags.contains(.shift))
+                          planet: LittleWindow.planet?.switcherPlanet ?? [], backwards: backwards)
             return true
         }
         // While the switcher is up, ⌃ and the arrows move through it; any
         // other key puts it away. Escape does nothing else: it would close
         // this window too, on the way out of the switcher.
         if switcher.active {
-            if flags.contains(.control), flags.isDisjoint(with: [.command, .option]) {
+            if ShortcutStore.shared.recentOnly(flags) {
                 let direction: TabSwitcher.Direction? = switch event.keyCode {
                 case 123: .left
                 case 124: .right
@@ -343,6 +351,9 @@ struct LittleView: View {
                     .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(Palette.muted)
                     .lineLimit(1)
+                    // The end of a long name is the part that counts: the
+                    // registrable domain, which a cut tail would lose.
+                    .truncationMode(.head)
                 Spacer(minLength: 0)
                 if let keep {
                     Pill("Open in Search", action: keep)
@@ -372,15 +383,27 @@ struct LittleView: View {
 
     /// The page on screen — not one still on its way, which a page can
     /// start and never finish — named as the site, or as what it is when
-    /// it isn't a website, and marked when it came over plain http.
+    /// it isn't a website, and marked when it came over plain http. Only
+    /// what has arrived (`committed`): the address a pop-up was asked to
+    /// open is not on screen until its page is. A page with nothing of its
+    /// own yet, about:blank or blob:, is its opener's, and named as that.
     private var site: String {
-        guard let url = tab.pageAddress else { return "" }
+        let arrived = tab.committed.flatMap { url -> URL? in
+            ["about", "blob"].contains(url.scheme?.lowercased() ?? "") ? nil : url
+        }
+        guard let url = arrived ?? opened else { return "" }
         switch url.scheme?.lowercased() {
         case "https": return SiteCard.site(url)
         case "http": return "Not secure — " + SiteCard.site(url)
         case "chrome-extension", "webkit-extension": return "Extension page"
         default: return url.absoluteString == "about:blank" ? "" : "Not a website"
         }
+    }
+
+    /// What the tab that opened this one has on screen.
+    private var opened: URL? {
+        guard let id = tab.opener else { return nil }
+        return Browsers.all.lazy.flatMap { $0.tabs }.first { $0.id == id }?.committed
     }
 }
 
@@ -423,15 +446,30 @@ private struct LittleToast: View {
     }
 }
 
-/// An extension's popup window (windows.create with type "popup"): the
+/// A website's sized pop-up or an extension's popup window: the
 /// browser's tab on screen as the small window shows a page, the site over
 /// it. Its tabs, checks and passwords are the browser's, as in any window.
-struct ExtensionPopupView: View {
+struct PopupWindowView: View {
     @ObservedObject var browser: Browser
 
     var body: some View {
         if let tab = browser.active {
             LittleView(tab: tab, keep: nil).id(tab.id)
+                .overlay(alignment: .topLeading) {
+                    if let asked = browser.suggesting, asked.tab == tab.id {
+                        AccountList(browser: browser, asked: asked).offset(y: 34)
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    VStack(spacing: 8) {
+                        if let ask = browser.asking {
+                            if ask.screen { ScreenQuestion(browser: browser, ask: ask) }
+                            else { CaptureQuestion(browser: browser, ask: ask) }
+                        }
+                        if let offer = browser.offering { PasswordOffer(browser: browser, offer: offer) }
+                    }
+                    .padding(12)
+                }
         } else {
             Palette.ground
         }
