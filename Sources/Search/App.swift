@@ -368,7 +368,7 @@ struct SearchApp: App {
                 Button("Downloads…") { browser.hoarding = true }
                     .shortcut("history.downloads")
                 Divider()
-                Button("Clear Browsing Data…") { browser.recallMode = .clearing }
+                Button("Clear Browsing Data…") { browser.clearBrowsingData() }
                     .shortcut("history.clearData")
                 Button("Clear History") { browser.clearHistory() }
                     .shortcut("history.clear")
@@ -1132,7 +1132,15 @@ struct ContentView: View {
                   let content = window.contentView,
                   let frame = content.superview
             else { return }
-            frame.addSubview(container, positioned: .above, relativeTo: content)
+            // Full screen keeps the title bar in a window of its own (see
+            // Lights.place); a window put back in full screen at launch, or
+            // opened from one, has it there already. Taken back into this
+            // window, its buttons showed at the window's foot, out of reach.
+            // Full screen ending puts it back above the content view itself,
+            // its zPosition kept.
+            if container.superview === frame {
+                frame.addSubview(container, positioned: .above, relativeTo: content)
+            }
             container.wantsLayer = true
             container.layer?.zPosition = 10
         }
@@ -1589,7 +1597,7 @@ struct ContentView: View {
 
         // Keep the clearing controls reachable from a focused page editor.
         if shifted, event.keyCode == 51 {
-            browser.recallMode = .clearing
+            browser.clearBrowsingData()
             return true
         }
 
