@@ -13,3 +13,8 @@ __pycache__/
 *.provisionprofile
 *.p12
 *.mobileprovision
+
+# code-monkey's Swift index — `code-monkey index` regenerates it from the
+# sources, and the audit log is this Mac's own. The config beside it,
+# .code-monkey.toml, is tracked.
+.code-monkey/
