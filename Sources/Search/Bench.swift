@@ -325,7 +325,7 @@ final class Bench {
         if surfboard(verb, request, browser: browser, answer) { return }
 
         switch verb {
-        case "tabs", "open", "go", "doc-answer", "close", "wait", "sleep", "pin", "select", "text", "nowplaying", "eval", "tap", "click", "type", "submit", "layouts", "openmark":
+        case "tabs", "open", "go", "doc-answer", "close", "wait", "sleep", "pin", "select", "text", "nowplaying", "imageData", "eval", "tap", "click", "type", "submit", "layouts", "openmark", "imageData":
             tabCommand(verb, request, browser: browser, answer)
 
         case "towindow", "news", "quit", "windows", "alive", "middle", "linkmenu":
@@ -539,6 +539,21 @@ final class Bench {
             }
             unsafeBitCast(imp, to: Ask.self)(tab.web, ask, reply)
 
+        case "imageData":
+            // What Copy Image fetches, timed, without touching the pasteboard:
+            // a test run must never take the person's clipboard.
+            guard let tab = find(request, in: browser),
+                  let url = (request["url"] as? String).flatMap(URL.init(string:))
+            else { answer(["error": "imageData needs id and url"]); return }
+            let started = CACurrentMediaTime()
+            Task { @MainActor in
+                let data = await browser.imageData(at: url, in: tab)
+                answer([
+                    "bytes": data?.count ?? -1,
+                    "ms": Int((CACurrentMediaTime() - started) * 1000),
+                    "reasonable": data.map(Browser.reasonable) ?? false,
+                ])
+            }
         case "eval":
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
             guard let js = request["js"] as? String else { answer(["error": "eval needs js"]); return }
